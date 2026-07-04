@@ -1,6 +1,6 @@
 # Roadmap
 
-Live tracker: [GitHub milestones](https://github.com/marctjones/onelag/milestones) and implementation issues [#1](https://github.com/marctjones/onelag/issues/1) through [#39](https://github.com/marctjones/onelag/issues/39). Treat GitHub milestones and issues as the implementation source of truth; keep this file synchronized when tracker scope changes.
+Live tracker: [GitHub milestones](https://github.com/marctjones/onelag/milestones) and implementation issues [#1](https://github.com/marctjones/onelag/issues/1) through [#60](https://github.com/marctjones/onelag/issues/60). Treat GitHub milestones and issues as the implementation source of truth; keep this file synchronized when tracker scope changes.
 
 ## v0.1 - Documentation And Scanner Foundation
 
@@ -68,10 +68,35 @@ Tracker: [v0.6 milestone](https://github.com/marctjones/onelag/milestone/6), iss
 - Add privacy and support-bundle docs.
 - Publish `v0.1.0` once the scanner is useful and safe.
 
+## v0.7 - Responsiveness Watch Mode
+
+Tracker: [v0.7 milestone](https://github.com/marctjones/onelag/milestone/7), issues [#40](https://github.com/marctjones/onelag/issues/40)-[#49](https://github.com/marctjones/onelag/issues/49).
+
+- Design the opt-in watch-mode privacy model, data-retention limits, and resource budget.
+- Add `onelag watch` lifecycle commands for start, stop, status, mark, and report.
+- Persist bounded ring-buffer telemetry without unbounded disk growth.
+- Sample system pressure, foreground-safe context, event-log summaries, and safe log-file metadata.
+- Detect responsiveness stalls with timer-jitter evidence and manual lag markers.
+- Generate episode timeline reports with direct evidence and inferred categories.
+- Hand off inconclusive episodes to Event Viewer, WPR/WPA, ProcMon, driver/update review, or OneDrive remediation guidance.
+- Validate all-day overhead and reliability on Windows 11.
+
+## v0.8 - Interactive And Native Interfaces
+
+Tracker: [v0.8 milestone](https://github.com/marctjones/onelag/milestone/8), issues [#50](https://github.com/marctjones/onelag/issues/50)-[#60](https://github.com/marctjones/onelag/issues/60).
+
+- Define UI-neutral service contracts shared by CLI, guided console, tray, and GUI.
+- Add a guided interactive console flow without committing to a full TUI.
+- Record a TUI-versus-guided-console decision.
+- Add local report and episode timeline viewing.
+- Add an optional tray controller for bounded watch mode.
+- Scaffold a native Windows GUI shell after a framework decision.
+- Build scan/watch dashboard, lag-marker UX, privacy/export controls, and accessibility validation.
+- Package CLI, GUI, and tray artifacts with explicit startup opt-in.
+
 ## Later
 
-- Optional GUI wrapper.
 - Optional Microsoft 365 admin sync report integration.
-- Optional automated WPR/ProcMon support-bundle workflow after the manual runbooks and privacy rules are proven.
+- Optional automated WPR/ProcMon support-bundle workflow after the manual runbooks, watch-mode evidence, and privacy rules are proven.
 - Optional cloud-side Microsoft Graph inventory.
-- Optional scheduled scans, only after the one-shot scanner has measured overhead and clear opt-in controls.
+- Optional scheduled scans, only after the one-shot scanner and watch mode have measured overhead and clear opt-in controls.

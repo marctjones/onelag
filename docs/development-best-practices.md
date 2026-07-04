@@ -73,6 +73,15 @@ Never write to undocumented OneDrive state. Use official user-facing remediation
 
 Do not automate disruptive Windows troubleshooting steps in ordinary scans. Clean boot, service disablement, Windows Search disablement, Defender disablement, startup-item disablement, WPR capture, and ProcMon capture are escalation material only.
 
+Watch mode rules:
+
+- Watch mode is opt-in, bounded, and off by default.
+- Persist structured samples in a ring buffer, not unbounded text logs.
+- Enforce duration, retention, disk size, and write-rate limits.
+- Do not capture keystrokes, mouse coordinates, screenshots, clipboard contents, raw document text, raw browser URLs, or raw meeting titles.
+- Foreground context, paths, event messages, and account data are redacted by default.
+- Watch reports must separate observed stalls from inferred causes.
+
 ## UX And UI Rules
 
 The MVP UX is a CLI plus Markdown/JSON reports.
@@ -100,6 +109,8 @@ Future GUI rules:
 - Support keyboard navigation, screen readers, high contrast, text scaling, and visible focus.
 - Avoid static layouts that clip at different window sizes; use responsive XAML layout patterns.
 - Keep remediation confirmation dialogs plain and explicit.
+- Tray and GUI startup must be explicit opt-in and reversible.
+- Watch controls must always show current recorder state, privacy mode, storage use, and stop control.
 
 ## Test Coverage Rules
 
@@ -125,6 +136,8 @@ Required tests:
 - `--execute` confirmation denied, confirmation accepted, partial failure, and rollback-note paths.
 - Counter-unavailable fallback.
 - Event-log unavailable, missing-provider, access-denied, and redacted-message fallback.
+- Watch ring-buffer retention, marker creation, timer-jitter classification, episode classification, and resource-budget behavior.
+- UI-neutral service contract tests for scan, watch, report loading, progress, cancellation, and errors.
 - CLI exit codes and invalid argument messages.
 
 Manual Windows validation before release:
@@ -136,6 +149,8 @@ Manual Windows validation before release:
 - Event-log access as a standard user.
 - A high-pressure non-OneDrive workload to verify the report avoids blaming OneDrive when evidence does not support it.
 - At least one large synthetic tree outside OneDrive and one inside a temporary OneDrive test root, if safe.
+- All-day watch-mode run with CPU, memory, disk-write, disk-footprint, battery, and cancellation observations.
+- Guided console, tray, and GUI validation when those interfaces are implemented.
 
 ## Development Workflow
 

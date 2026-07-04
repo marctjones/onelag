@@ -8,6 +8,8 @@ OneLag is a Windows diagnostic and remediation tool for OneDrive-induced lag. Tr
 
 The default product shape is a one-shot Windows CLI. Do not add a resident service, tray monitor, GUI, automatic file mover, OneDrive reset, or process-kill behavior unless a GitHub issue explicitly calls for it and the implementation includes safety review, tests, and documentation.
 
+Post-MVP watch mode and interface work is allowed only under the dedicated GitHub issues. Watch mode must be opt-in, bounded by duration and storage limits, and off by default.
+
 ## Required Workflow
 
 - Start each task by checking the relevant GitHub issue, local roadmap docs, and current worktree.
@@ -30,6 +32,8 @@ The default product shape is a one-shot Windows CLI. Do not add a resident servi
 - Do not claim OneDrive is the cause unless static inventory, live telemetry, event evidence, or user-supplied symptoms support that conclusion. Use `OneDrive possible`, `OneDrive not proven`, or `non-OneDrive pressure suspected` when evidence is mixed.
 - Event-log reads, WPR guidance, ProcMon guidance, and support-bundle workflows must be bounded, privacy-aware, and read-only unless an issue explicitly requests confirmed capture or export behavior.
 - Do not automate clean boot, service disablement, Windows Search disablement, Defender disablement, startup-item disablement, Event Viewer log clearing, WPR capture, or ProcMon capture in default scan paths.
+- Do not capture keystrokes, mouse coordinates, screenshots, clipboard contents, raw document text, raw browser URLs, or raw meeting titles. Foreground app/window context must be redacted by default.
+- Any tray startup, GUI background launch, scheduled scan, or watch-mode startup must require explicit user opt-in and must be reversible.
 
 ## .NET Project Rules
 
@@ -59,6 +63,7 @@ Minimum expectations:
 - Reports must distinguish observed evidence from heuristic inference.
 - Do not present destructive commands as the first recommendation unless the report classifies the case as emergency recovery.
 - If a GUI is added later, use native Windows UI guidance, support keyboard and screen-reader use, support high contrast and text scaling, and avoid hiding safety-critical details behind decorative UI.
+- Tray and GUI controls for watch mode must expose recorder status, storage use, privacy mode, stop control, and "mark lag now" without burying safety-critical state.
 
 ## GitHub Management Rules
 

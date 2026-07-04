@@ -29,6 +29,16 @@ On startup, the process should:
 8. Stop early when risk thresholds are already exceeded.
 9. Emit a report and recommended next actions.
 
+Later versions may add an opt-in watch command for recurring responsiveness problems:
+
+```powershell
+onelag watch start --duration 8h --buffer 30m
+onelag watch mark
+onelag watch report
+```
+
+Watch mode must be explicitly started, bounded by duration and storage limits, and safe to stop at any time. It is a recorder for evidence around transient freezes, not a resident optimizer.
+
 ## Components
 
 ### Root Discovery
@@ -101,6 +111,54 @@ Behavior:
 - Treat access-denied, missing logs, and query errors as degraded evidence.
 
 Event-log evidence should increase confidence only when it aligns with static inventory or live telemetry. It should not be treated as proof of a specific root cause by itself.
+
+### Responsiveness Watcher
+
+The watcher is an optional post-MVP component for daily keyboard, mouse, and UI stalls that may not be reconstructable from logs after the fact.
+
+Signals:
+
+- Periodic system-pressure samples.
+- Responsiveness canary samples such as timer jitter and scheduling delay.
+- Foreground process identity with privacy-safe redaction.
+- Manual "lag happened now" markers from CLI, tray, or GUI.
+- Event-log summaries near marked or detected episodes.
+- Safe log-file metadata such as file count, modified time, and churn rate.
+
+The watcher must not capture keystrokes, mouse coordinates, screenshots, clipboard contents, document text, raw browser URLs, raw meeting titles, or raw log contents by default.
+
+Storage model:
+
+- Structured ring buffer.
+- Maximum age, disk size, and write-rate limits.
+- Redaction before persistence where possible.
+- Reports saved outside OneDrive by default when possible.
+
+Episode categories:
+
+- `storage pressure`.
+- `cpu starvation`.
+- `memory paging`.
+- `driver-or-dpc-suspected`.
+- `foreground-app-blocked`.
+- `onedrive-possible`.
+- `unknown`.
+
+Driver/DPC suspicion from user-mode samples is only a hypothesis. WPR/WPA is required to prove DPC/ISR behavior.
+
+### Interface Surfaces
+
+The diagnostic core should stay UI-neutral.
+
+Supported interface progression:
+
+- CLI for automation and testability.
+- Guided console for safer interactive use.
+- Local report/timeline viewer for scan and watch outputs.
+- Optional tray controller for watch status and "mark lag now".
+- Native Windows GUI only after scan/watch services are stable.
+
+All interfaces must call shared application services. No diagnostic rules should live only in GUI or tray code.
 
 ### Streaming Filesystem Scanner
 
@@ -190,6 +248,8 @@ The policy should be data-driven in a config file so Microsoft limit changes can
 - No undocumented OneDrive database writes.
 - No log-content upload.
 - No automatic WPR, ProcMon, clean boot, service disablement, Windows Search disablement, Defender disablement, startup-item disablement, or Event Viewer log clearing.
+- No automatic watch mode, tray startup, or GUI background launch without explicit opt-in.
+- No keylogging, screenshot capture, clipboard capture, raw document capture, or raw input-event capture.
 - No assumption that cloud deletion is reversible from the local Recycle Bin.
 - All move plans must verify destination free space before execution.
 

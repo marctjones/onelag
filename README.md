@@ -4,6 +4,8 @@ OneLag is a planned Windows diagnostic and remediation utility for OneDrive-driv
 
 The working product is a low-impact, one-shot diagnostic CLI first. It should identify local OneDrive roots, measure current OneDrive, whole-system, event-log, and disk evidence, stream-count high-risk directory clusters without loading huge file lists into memory, and produce a practical remediation plan. It should not start as a resident background service.
 
+After the one-shot scanner is proven, the roadmap adds an opt-in responsiveness watch mode for recurring keyboard, mouse, and UI freezes. That mode is planned as a bounded recorder with explicit start/stop controls, lag markers, privacy redaction, ring-buffer retention, and strict resource limits.
+
 ## What We Are Working On
 
 We are building a tool that answers these questions on a Windows machine:
@@ -17,12 +19,13 @@ We are building a tool that answers these questions on a Windows machine:
 - Do recent Windows event logs support or weaken the OneDrive hypothesis?
 - What specific folders should be moved out of OneDrive, made online-only, excluded from sync, or reviewed by an administrator?
 - What safe, reversible commands should the user run next?
+- If the issue happens later, can an opt-in recorder preserve enough evidence around the freeze to explain it?
 
-The first implementation target is a .NET Windows console application because the source guide and Microsoft APIs line up around `System.Diagnostics.PerformanceCounter`, `Process.PriorityClass`, and streaming `System.IO` enumeration. A GUI can come later after the core scanner is proven.
+The first implementation target is a .NET Windows console application because the source guide and Microsoft APIs line up around `System.Diagnostics.PerformanceCounter`, `Process.PriorityClass`, and streaming `System.IO` enumeration. Guided console, tray, and native GUI surfaces can come later after the core scanner and watch services are proven.
 
 ## Non-Goals
 
-- No continuous background watcher in the MVP.
+- No continuous background watcher in the MVP. Later watch mode must be opt-in, bounded, and explicitly started.
 - No silent file moves, deletes, OneDrive resets, or process kills.
 - No automatic WPR, ProcMon, clean boot, service disablement, Windows Search disablement, or Defender disablement in the default scan path.
 - No attempt to parse undocumented OneDrive database internals.
@@ -41,4 +44,4 @@ The first implementation target is a .NET Windows console application because th
 
 ## Current Status
 
-The repository currently contains the source PDF, design documentation, development guardrails, GitHub planning templates, and live milestones/issues [#1](https://github.com/marctjones/onelag/issues/1)-[#39](https://github.com/marctjones/onelag/issues/39). Implementation has not started yet.
+The repository currently contains the source PDF, design documentation, development guardrails, GitHub planning templates, and live milestones/issues [#1](https://github.com/marctjones/onelag/issues/1)-[#60](https://github.com/marctjones/onelag/issues/60). Implementation has not started yet.

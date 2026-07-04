@@ -145,6 +145,49 @@ Acceptance:
 
 - A user can download a release, run a scan, and understand the output without building from source.
 
+## Phase 8 - Responsiveness Watch Mode
+
+Goal: capture bounded real-time evidence for recurring keyboard, mouse, and UI freezes.
+
+Tasks:
+
+- Design the watch-mode architecture, privacy model, and resource budget.
+- Add `watch start`, `watch stop`, `watch status`, `watch mark`, and `watch report` commands.
+- Implement a bounded ring-buffer telemetry store.
+- Sample low-rate CPU, memory, disk, process, power, event-log, and safe log-file metadata.
+- Add a responsiveness canary for timer jitter and scheduling delay.
+- Capture foreground process context and user lag markers with privacy redaction.
+- Detect episodes and generate Markdown/JSON timeline reports.
+- Recommend Event Viewer, WPR/WPA, ProcMon, OneDrive, driver/update, or hardware/storage-health escalation when evidence points there.
+- Validate all-day overhead on Windows 11.
+
+Acceptance:
+
+- Watch mode is opt-in, bounded, cancelable, and off by default.
+- Reports explain lag episodes without capturing private input, screenshots, clipboard data, or raw document content.
+- Storage, CPU, memory, and disk-write overhead stay within the documented resource budget.
+
+## Phase 9 - Interactive And Native Interfaces
+
+Goal: add user-friendly interfaces without duplicating diagnostic logic.
+
+Tasks:
+
+- Define UI-neutral application service contracts.
+- Add a guided interactive console flow.
+- Record a TUI-versus-guided-console decision.
+- Generate a local report and episode timeline viewer.
+- Add an optional tray controller for watch mode.
+- Choose and scaffold a native Windows GUI framework.
+- Build scan/watch dashboard, lag-marker UX, privacy/export controls, and accessibility validation.
+- Package CLI, GUI, and tray artifacts with explicit startup opt-in.
+
+Acceptance:
+
+- CLI, guided console, tray, and GUI all reuse the same diagnostic services.
+- Tray and GUI background behavior require explicit opt-in and are reversible.
+- GUI workflows pass keyboard, high contrast, text scaling, and screen-reader validation before release.
+
 ## Open Technical Questions
 
 - Whether to use `System.Diagnostics.PerformanceCounter` directly, PowerShell `Get-Counter`, or PDH bindings as the primary counter backend.
@@ -154,6 +197,9 @@ Acceptance:
 - Which event logs and providers are useful across personal and work/school OneDrive installs without requiring administrator rights.
 - Whether WPR support should remain documentation-only for the first release or include optional command generation behind explicit confirmation.
 - Whether ProcMon support should be limited to filter templates and docs or include an optional collection workflow later.
+- Which watch-mode sampling intervals preserve useful evidence without creating measurable lag.
+- Whether the native GUI should use WinUI 3/Windows App SDK or WPF.
+- Whether a full TUI adds enough value beyond guided console and generated reports.
 
 ## Tracker Source Of Truth
 
