@@ -105,7 +105,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $notes = "OneLag installable preview. Includes self-contained Windows x64 CLI, one-shot scan, fuller OneDrive known-issue detection, Windows PDH/process/memory/power performance sampling, Event Viewer summary correlation, WPR/WPA and ProcMon trace-plan generation, dry-run remediation move-plan generation with rollback/verification scripts, client-cache health metadata, supported OneDrive reset dry-run/explicit execution, report generation, and bounded watch-mode recorder foundation."
+          $notes = "OneLag installable preview. Includes self-contained Windows x64 CLI, one-shot scan, fuller OneDrive known-issue detection, Windows PDH/process/memory/power performance sampling, Event Viewer summary correlation, WPR/WPA and ProcMon trace-plan generation, dry-run remediation move-plan generation with rollback/verification scripts, client-cache health metadata, supported OneDrive reset dry-run/explicit execution, report generation, bounded watch-mode recording, and watch episode timeline detection."
           if ("${{ github.ref_name }}".Contains("-")) {
             gh release create "${{ github.ref_name }}" `
               artifacts/*installer.zip `
