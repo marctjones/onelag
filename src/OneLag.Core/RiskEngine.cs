@@ -8,6 +8,16 @@ public sealed class RiskEngine
         SystemPressureSnapshot pressure,
         OneDriveClientHealthSnapshot clientHealth)
     {
+        return Analyze(inventories, telemetry, pressure, clientHealth, Array.Empty<EventLogSummary>());
+    }
+
+    public (DifferentialDiagnosis Diagnosis, IReadOnlyList<Finding> Findings, IReadOnlyList<Recommendation> Recommendations) Analyze(
+        IReadOnlyList<InventorySummary> inventories,
+        TelemetrySnapshot telemetry,
+        SystemPressureSnapshot pressure,
+        OneDriveClientHealthSnapshot clientHealth,
+        IReadOnlyList<EventLogSummary> eventLogs)
+    {
         var findings = new List<Finding>();
         var recommendations = new List<Recommendation>();
 
@@ -24,6 +34,9 @@ public sealed class RiskEngine
         var logChurn = telemetry.OneDriveLogFilesChangedLastMinute;
         var resetWorthConsidering = clientHealth.ResetCommands.Count > 0
             && clientHealth.Signals.Any(signal => signal.Severity is Severity.Warning or Severity.HighRisk or Severity.Emergency);
+        var recentWindowsEvents = eventLogs
+            .Where(summary => summary.Level is "Critical" or "Error" or "Warning")
+            .ToArray();
 
         if (totalItems >= 1_000_000)
         {
@@ -109,14 +122,31 @@ public sealed class RiskEngine
                 "medium"));
         }
 
+        if (recentWindowsEvents.Length > 0)
+        {
+            var topEvents = string.Join(", ", recentWindowsEvents
+                .OrderByDescending(summary => summary.Count)
+                .ThenBy(summary => summary.Provider, StringComparer.OrdinalIgnoreCase)
+                .Take(5)
+                .Select(summary => $"{summary.LogName}/{summary.Provider}/{summary.EventId}/{summary.Level}={summary.Count:N0}"));
+
+            findings.Add(new Finding(
+                Severity.Warning,
+                "Recent Windows reliability events were observed",
+                $"Event Viewer had recent critical, error, or warning summaries. Top events: {topEvents}.",
+                "medium"));
+        }
+
         var hasStaticOneDriveRisk = totalItems >= 200_000 || highRiskDirectories > 0 || highRiskBlockers > 0 || capped;
         var hasLiveOneDriveRisk = (onedriveRunning && logChurn >= 5) || resetWorthConsidering;
+        var hasRecentWindowsEventRisk = recentWindowsEvents.Length > 0;
 
         var diagnosis = (hasStaticOneDriveRisk, hasLiveOneDriveRisk) switch
         {
             (true, true) => DifferentialDiagnosis.OneDriveLikely,
             (true, false) => DifferentialDiagnosis.OneDrivePossible,
             (false, true) => DifferentialDiagnosis.OneDrivePossible,
+            _ when hasRecentWindowsEventRisk => DifferentialDiagnosis.NonOneDrivePressureSuspected,
             _ when pressure.EvidenceState.Contains("pressure", StringComparison.OrdinalIgnoreCase) => DifferentialDiagnosis.NonOneDrivePressureSuspected,
             _ => DifferentialDiagnosis.OneDriveNotProven
         };
@@ -188,6 +218,15 @@ public sealed class RiskEngine
                 "Consider a supported OneDrive reset",
                 "Microsoft documents OneDrive reset as a supported sync repair path that rebuilds the DAT cache after restart.",
                 "Run `onelag repair reset-onedrive` first to review the dry-run plan. Execute only after confirming sync status and work policy."));
+        }
+
+        if (hasRecentWindowsEventRisk)
+        {
+            recommendations.Add(new Recommendation(
+                RecommendationKind.EscalateToEventViewer,
+                "Review recent Event Viewer reliability evidence",
+                "Recent critical, error, or warning events can explain lag that the OneDrive inventory alone cannot prove.",
+                "Use Event Viewer details as local evidence; avoid sharing full logs without reviewing sensitive data."));
         }
 
         if (diagnosis is DifferentialDiagnosis.OneDriveNotProven or DifferentialDiagnosis.NonOneDrivePressureSuspected)

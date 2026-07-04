@@ -89,6 +89,20 @@ public static class ReportWriter
         }
 
         builder.AppendLine();
+        builder.AppendLine("## Recent Windows Events");
+        if (report.EventLogs.Count == 0)
+        {
+            builder.AppendLine("- No recent Windows critical, error, or warning event summaries were available.");
+        }
+        else
+        {
+            foreach (var summary in report.EventLogs)
+            {
+                builder.AppendLine($"- `{summary.LogName}` `{summary.Provider}` event `{summary.EventId}` `{summary.Level}` count `{summary.Count:N0}` newest `{summary.NewestTimestamp?.ToString("O") ?? "unknown"}`");
+            }
+        }
+
+        builder.AppendLine();
         builder.AppendLine("## Findings");
         foreach (var finding in report.Findings)
         {

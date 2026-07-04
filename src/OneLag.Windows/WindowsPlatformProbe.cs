@@ -7,6 +7,8 @@ namespace OneLag.Windows;
 public sealed class WindowsPlatformProbe : PortablePlatformProbe
 {
     private const long LargeOneDriveLogStoreBytes = 250L * 1024 * 1024;
+    private const int MaxEventLogEventsPerChannel = 200;
+    private const int EventLogQueryTimeoutMilliseconds = 5_000;
 
     public override TelemetrySnapshot CaptureTelemetry()
     {
@@ -123,8 +125,41 @@ public sealed class WindowsPlatformProbe : PortablePlatformProbe
 
     public override IReadOnlyList<EventLogSummary> ReadRecentEventSummaries(DateTimeOffset since)
     {
-        _ = since;
-        return Array.Empty<EventLogSummary>();
+        if (!OperatingSystem.IsWindows())
+        {
+            return base.ReadRecentEventSummaries(since);
+        }
+
+        var window = DateTimeOffset.UtcNow - since.ToUniversalTime();
+        if (window <= TimeSpan.Zero)
+        {
+            window = TimeSpan.FromMinutes(10);
+        }
+
+        if (window > TimeSpan.FromHours(24))
+        {
+            window = TimeSpan.FromHours(24);
+        }
+
+        var milliseconds = Math.Max(1, (long)window.TotalMilliseconds);
+        var summaries = new List<EventLogSummary>();
+        summaries.AddRange(ReadRecentEventSummaries("System", milliseconds));
+        summaries.AddRange(ReadRecentEventSummaries("Application", milliseconds));
+
+        return summaries
+            .GroupBy(summary => (summary.LogName, summary.Provider, summary.EventId, summary.Level))
+            .Select(group => new EventLogSummary(
+                group.Key.LogName,
+                group.Key.Provider,
+                group.Key.EventId,
+                group.Key.Level,
+                group.Sum(summary => summary.Count),
+                group.Select(summary => summary.NewestTimestamp).Max()))
+            .OrderByDescending(summary => summary.NewestTimestamp)
+            .ThenByDescending(summary => summary.Count)
+            .ThenBy(summary => summary.Provider, StringComparer.OrdinalIgnoreCase)
+            .Take(50)
+            .ToArray();
     }
 
     public override string? GetForegroundProcessName()
@@ -403,6 +438,64 @@ public sealed class WindowsPlatformProbe : PortablePlatformProbe
         {
             return "unknown";
         }
+    }
+
+    private static IReadOnlyList<EventLogSummary> ReadRecentEventSummaries(string logName, long milliseconds)
+    {
+        var query = $"*[System[TimeCreated[timediff(@SystemTime) <= {milliseconds}] and (Level=1 or Level=2 or Level=3)]]";
+        try
+        {
+            using var process = Process.Start(CreateWevtutilStartInfo(logName, query));
+            if (process is null)
+            {
+                return Array.Empty<EventLogSummary>();
+            }
+
+            var output = process.StandardOutput.ReadToEndAsync();
+            var error = process.StandardError.ReadToEndAsync();
+            if (!process.WaitForExit(EventLogQueryTimeoutMilliseconds))
+            {
+                try
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+                catch (InvalidOperationException)
+                {
+                }
+
+                return Array.Empty<EventLogSummary>();
+            }
+
+            if (process.ExitCode != 0)
+            {
+                _ = error.GetAwaiter().GetResult();
+                return Array.Empty<EventLogSummary>();
+            }
+
+            return EventLogXmlParser.Parse(logName, output.GetAwaiter().GetResult());
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            return Array.Empty<EventLogSummary>();
+        }
+    }
+
+    private static ProcessStartInfo CreateWevtutilStartInfo(string logName, string query)
+    {
+        var startInfo = new ProcessStartInfo("wevtutil")
+        {
+            CreateNoWindow = true,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add("qe");
+        startInfo.ArgumentList.Add(logName);
+        startInfo.ArgumentList.Add($"/q:{query}");
+        startInfo.ArgumentList.Add("/f:xml");
+        startInfo.ArgumentList.Add($"/c:{MaxEventLogEventsPerChannel}");
+        startInfo.ArgumentList.Add("/rd:true");
+        return startInfo;
     }
 
     [DllImport("user32.dll")]

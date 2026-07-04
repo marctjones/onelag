@@ -31,7 +31,7 @@ public sealed class ScanRunner
             inventories.Add(inventoryScanner.Scan(root.Path, options.MaxItems, cancellationToken));
         }
 
-        var (diagnosis, findings, recommendations) = riskEngine.Analyze(inventories, telemetry, pressure, clientHealth);
+        var (diagnosis, findings, recommendations) = riskEngine.Analyze(inventories, telemetry, pressure, clientHealth, eventLogs);
         return new DiagnosticReport(started, DateTimeOffset.UtcNow, roots, inventories, telemetry, pressure, clientHealth, eventLogs, diagnosis, findings, recommendations);
     }
 

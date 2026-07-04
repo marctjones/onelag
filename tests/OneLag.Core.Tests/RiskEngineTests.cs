@@ -127,6 +127,33 @@ public sealed class RiskEngineTests
         Assert.Contains(result.Recommendations, recommendation => recommendation.Kind == RecommendationKind.ResetOneDrive);
     }
 
+    [Fact]
+    public void AnalyzeClassifiesRecentEventLogsAsNonOneDrivePressure()
+    {
+        var inventory = new InventorySummary(
+            "C:\\Users\\test\\OneDrive",
+            1,
+            1,
+            0,
+            1,
+            false,
+            Array.Empty<string>(),
+            Array.Empty<TopLevelInventory>(),
+            Array.Empty<DirectoryRisk>(),
+            Array.Empty<SyncBlocker>());
+
+        var eventLogs = new[]
+        {
+            new EventLogSummary("System", "Disk", 153, "Warning", 3, DateTimeOffset.UtcNow)
+        };
+
+        var result = new RiskEngine().Analyze(new[] { inventory }, EmptyTelemetry(), EmptyPressure(), EmptyHealth(), eventLogs);
+
+        Assert.Equal(DifferentialDiagnosis.NonOneDrivePressureSuspected, result.Diagnosis);
+        Assert.Contains(result.Findings, finding => finding.Title == "Recent Windows reliability events were observed");
+        Assert.Contains(result.Recommendations, recommendation => recommendation.Kind == RecommendationKind.EscalateToEventViewer);
+    }
+
     private static TelemetrySnapshot EmptyTelemetry()
     {
         return new TelemetrySnapshot(DateTimeOffset.UtcNow, Array.Empty<ProcessSample>(), 0, null, "test");
