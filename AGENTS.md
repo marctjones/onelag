@@ -27,6 +27,9 @@ The default product shape is a one-shot Windows CLI. Do not add a resident servi
 - Treat unavailable counters, inaccessible paths, missing OneDrive roots, and permission failures as reportable degraded evidence, not routine crashes.
 - Do not parse or write undocumented OneDrive database internals.
 - Redact user-specific paths in reports by default unless a user explicitly requests full paths.
+- Do not claim OneDrive is the cause unless static inventory, live telemetry, event evidence, or user-supplied symptoms support that conclusion. Use `OneDrive possible`, `OneDrive not proven`, or `non-OneDrive pressure suspected` when evidence is mixed.
+- Event-log reads, WPR guidance, ProcMon guidance, and support-bundle workflows must be bounded, privacy-aware, and read-only unless an issue explicitly requests confirmed capture or export behavior.
+- Do not automate clean boot, service disablement, Windows Search disablement, Defender disablement, startup-item disablement, Event Viewer log clearing, WPR capture, or ProcMon capture in default scan paths.
 
 ## .NET Project Rules
 

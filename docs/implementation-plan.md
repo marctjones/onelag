@@ -74,20 +74,24 @@ Acceptance:
 
 ## Phase 4 - Live Telemetry Correlation
 
-Goal: correlate static folder risk with current OneDrive and disk pressure.
+Goal: correlate static folder risk with current OneDrive, whole-system, event-log, and disk pressure.
 
 Tasks:
 
 - Collect OneDrive process CPU and memory samples.
+- Capture a low-cost whole-system pressure snapshot.
 - Collect disk queue counters when available.
 - Count OneDrive log-file churn by timestamp.
+- Query recent Application, System, and OneDrive-relevant event logs when available.
 - Degrade gracefully when counters or log paths are unavailable.
 - Add consecutive-sample rules to reduce false positives.
 
 Acceptance:
 
 - Reports distinguish "risky tree found" from "risky tree plus current pressure".
+- Reports classify evidence as `OneDrive likely`, `OneDrive possible`, `OneDrive not proven`, or `non-OneDrive pressure suspected`.
 - Missing counters are recorded as unknown, not failure.
+- Event-log access failures are recorded as unknown, not failure.
 
 ## Phase 5 - Risk Engine And Recommendations
 
@@ -97,13 +101,16 @@ Tasks:
 
 - Implement threshold policy with default `300,000` item guidance.
 - Add configurable public-preview `1,000,000` item profile checks.
-- Score risks by item count, churn, path validity, staleness, CPU, disk queue, and log churn.
+- Score risks by item count, churn, path validity, staleness, hidden/temp/large-file blockers, CPU, disk queue, log churn, event evidence, and whole-system pressure.
 - Generate action plans with confidence and rationale.
+- Recommend Microsoft Support and Recovery Assistant for work/school account or sync-client repair cases.
+- Recommend Event Viewer, ProcMon, or WPR/WPA escalation when OneDrive causality is not established.
 
 Acceptance:
 
 - The top report section names the most likely cause and the safest first action.
 - Recommendations cite whether they came from direct evidence, heuristic inference, or official OneDrive guidance.
+- Reports avoid folder-move recommendations when the evidence points to broader non-OneDrive pressure.
 
 ## Phase 6 - Remediation Script Generation
 
@@ -144,7 +151,9 @@ Acceptance:
 - Whether root discovery should depend on registry reads or keep registry access optional.
 - Whether high-risk development directories should be counted fully or summarized with capped estimates by default.
 - Whether OneDrive log churn can be used reliably without relying on undocumented log formats.
-- Whether an optional ETW/WPR support bundle is worth adding before the GUI.
+- Which event logs and providers are useful across personal and work/school OneDrive installs without requiring administrator rights.
+- Whether WPR support should remain documentation-only for the first release or include optional command generation behind explicit confirmation.
+- Whether ProcMon support should be limited to filter templates and docs or include an optional collection workflow later.
 
 ## Tracker Source Of Truth
 

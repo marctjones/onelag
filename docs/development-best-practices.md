@@ -57,6 +57,7 @@ Required design decisions:
 - Use streaming enumeration and bounded summaries for directory walks.
 - Keep cancellation responsive.
 - Treat unavailable telemetry as unknown evidence, not a crash.
+- Treat mixed evidence as mixed evidence. The product must support `OneDrive likely`, `OneDrive possible`, `OneDrive not proven`, and `non-OneDrive pressure suspected` outcomes.
 - Avoid background polling unless a future issue explicitly adds an opt-in scheduler.
 - Keep all remediation actions separate from diagnosis.
 
@@ -69,6 +70,8 @@ Layer boundaries:
 - Executor is optional and must require explicit confirmation.
 
 Never write to undocumented OneDrive state. Use official user-facing remediation guidance for pause, selective sync, Files On-Demand, and reset.
+
+Do not automate disruptive Windows troubleshooting steps in ordinary scans. Clean boot, service disablement, Windows Search disablement, Defender disablement, startup-item disablement, WPR capture, and ProcMon capture are escalation material only.
 
 ## UX And UI Rules
 
@@ -88,7 +91,7 @@ Report rules:
 - Markdown report for humans.
 - JSON report for automation and tests.
 - Redact local user paths by default.
-- Include scan start/end time, version, root confidence, inaccessible paths summary, counter availability, and recommendation confidence.
+- Include scan start/end time, version, root confidence, inaccessible paths summary, counter availability, event-log availability, system-pressure classification, differential diagnosis, and recommendation confidence.
 
 Future GUI rules:
 
@@ -112,13 +115,16 @@ Initial coverage targets after code exists:
 Required tests:
 
 - Threshold policy around 200,000, 300,000, and public-preview 1,000,000 item policy.
-- Risk score combinations for item count, dev directories, disk queue, CPU, log churn, and unknown evidence.
+- Risk score combinations for item count, dev directories, sync blockers, disk queue, CPU, event evidence, system pressure, log churn, and unknown evidence.
+- Differential diagnosis classification for `OneDrive likely`, `OneDrive possible`, `OneDrive not proven`, and `non-OneDrive pressure suspected`.
 - Report redaction and full-path opt-in.
 - Streaming scanner cancellation and inaccessible directory behavior.
+- Hidden, temporary, large-file, invalid-name, and long-path sync-blocker detection.
 - Synthetic large-tree scan memory guard.
 - Dry-run move plan generation.
 - `--execute` confirmation denied, confirmation accepted, partial failure, and rollback-note paths.
 - Counter-unavailable fallback.
+- Event-log unavailable, missing-provider, access-denied, and redacted-message fallback.
 - CLI exit codes and invalid argument messages.
 
 Manual Windows validation before release:
@@ -127,6 +133,8 @@ Manual Windows validation before release:
 - Work or school OneDrive root if available.
 - OneDrive active, paused, and reset states.
 - Files On-Demand online-only and locally available files.
+- Event-log access as a standard user.
+- A high-pressure non-OneDrive workload to verify the report avoids blaming OneDrive when evidence does not support it.
 - At least one large synthetic tree outside OneDrive and one inside a temporary OneDrive test root, if safe.
 
 ## Development Workflow

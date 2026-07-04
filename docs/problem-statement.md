@@ -37,6 +37,8 @@ The user does not need another generic cleaner. They need a tool that can run wh
 3. Which action is safest and most likely to help.
 4. Which built-in Microsoft remediation step should be used, if any.
 
+The tool must also be able to say when OneDrive is not proven. On a Windows 11 laptop, similar lag can come from broader system pressure such as Windows Search, Defender, Windows Update, browser caches, build tools, storage pressure, or another process generating disk I/O. OneLag should strengthen or weaken the OneDrive hypothesis with live telemetry, event evidence, and folder inventory rather than treating any slow machine with a OneDrive folder as a OneDrive failure.
+
 ## Success Criteria
 
 OneLag succeeds when it can:
@@ -44,6 +46,8 @@ OneLag succeeds when it can:
 - Complete a scan of large OneDrive trees without large memory spikes.
 - Avoid making UI lag worse while it is diagnosing.
 - Rank risky synced folders by item count, churn indicators, and known high-write development patterns.
+- Detect common sync blockers beyond item count, including hidden files, temporary files, invalid names, long paths, and large archive/media/mail files.
+- Distinguish `OneDrive likely`, `OneDrive possible`, `OneDrive not proven`, and `non-OneDrive pressure suspected`.
 - Distinguish "observe", "warn", "move out of OneDrive", "pause sync", and "reset OneDrive" recommendations.
 - Generate a human-readable report plus optional dry-run PowerShell commands.
 - Require explicit confirmation before any process kill, OneDrive reset, or file move.

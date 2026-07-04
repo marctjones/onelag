@@ -22,10 +22,12 @@ On startup, the process should:
 1. Set its own process priority to `Idle`.
 2. Register cancellation handlers for Ctrl+C.
 3. Detect OneDrive roots and accounts.
-4. Sample low-cost telemetry before walking file trees.
-5. Stream filesystem metadata with bounded memory.
-6. Stop early when risk thresholds are already exceeded.
-7. Emit a report and recommended next actions.
+4. Capture a low-cost system-pressure snapshot.
+5. Sample OneDrive and disk telemetry before walking file trees.
+6. Stream filesystem metadata with bounded memory.
+7. Correlate recent event-log evidence when available.
+8. Stop early when risk thresholds are already exceeded.
+9. Emit a report and recommended next actions.
 
 ## Components
 
@@ -58,6 +60,48 @@ Telemetry to collect:
 
 The collector should treat unavailable counters as degraded evidence, not a fatal error.
 
+### System Pressure Snapshot
+
+The scanner needs enough non-OneDrive context to avoid blaming OneDrive whenever the machine is slow.
+
+Signals:
+
+- Total CPU pressure.
+- Available memory and paging pressure when available.
+- Disk free space for the OneDrive volume and planned destination volume.
+- Disk queue or disk active-time counters when available.
+- Storage media class where available, especially HDD versus SSD for public-preview item-count eligibility.
+- Top process names by CPU or I/O only when the platform API supports a low-cost read.
+
+The snapshot should classify pressure as:
+
+- `onedrive-dominated`: OneDrive process pressure aligns with disk or event evidence.
+- `mixed`: OneDrive is active but other system pressure is also significant.
+- `not-onedrive-dominated`: the machine is under pressure but OneDrive is not the leading signal.
+- `unknown`: counters or permissions were insufficient.
+
+The report must make this classification visible before any remediation recommendation.
+
+### Event Log Correlator
+
+The correlator should perform a bounded, read-only query over recent events.
+
+Initial logs:
+
+- `Application`.
+- `System`.
+- OneDrive-relevant Applications and Services logs when present.
+
+Behavior:
+
+- Query a recent time window, defaulting to the scan window plus a small lookback.
+- Use reverse chronological reads and a maximum event count.
+- Summarize provider, level, event ID, timestamp, and count.
+- Redact or omit message text by default because event messages may contain user paths or account details.
+- Treat access-denied, missing logs, and query errors as degraded evidence.
+
+Event-log evidence should increase confidence only when it aligns with static inventory or live telemetry. It should not be treated as proof of a specific root cause by itself.
+
 ### Streaming Filesystem Scanner
 
 The scanner must never call APIs that materialize entire recursive file arrays for large roots.
@@ -69,6 +113,7 @@ Required behavior:
 - Keep bounded memory summaries per directory.
 - Track item counts, max depth, recent-write density, oldest and newest `LastWriteTime`, and extension/type patterns.
 - Detect high-risk directory names such as `.git`, `node_modules`, `.venv`, `venv`, `bin`, `obj`, `target`, `.gradle`, `.next`, `dist`, and `build`.
+- Detect likely sync blockers such as hidden-file clusters, `.tmp` and temp-file clusters, large archive/media/mail data files, invalid OneDrive names, long paths, and unsupported reparse points.
 - Early-stop subtree counting after configurable caps where the exact count would not change the recommendation.
 - Preserve errors as report findings instead of aborting the scan.
 
@@ -78,9 +123,12 @@ The risk engine combines independent signals:
 
 - Item-count pressure against the supported OneDrive limit policy.
 - High-churn development directories inside OneDrive.
+- Hidden, temporary, very large, invalid-name, and long-path sync blockers.
 - Current OneDrive CPU pressure.
 - Disk queue pressure.
 - OneDrive log churn.
+- Recent event-log evidence.
+- Whole-system pressure classification.
 - Long paths and invalid OneDrive names.
 - Stale large clusters that are safe candidates for archive or relocation.
 
@@ -88,6 +136,7 @@ The report should separate:
 
 - Evidence observed directly.
 - Heuristics inferred from evidence.
+- Differential diagnosis: `OneDrive likely`, `OneDrive possible`, `OneDrive not proven`, or `non-OneDrive pressure suspected`.
 - Recommended action.
 - Confidence level.
 
@@ -104,6 +153,8 @@ Action types:
 - `selective-sync`: recommend choosing fewer synced folders.
 - `reset-onedrive`: emergency or post-cleanup repair, with warning that sync connections may need reconfiguration.
 - `kill-onedrive`: emergency-only command, never automatic.
+- `support-and-recovery-assistant`: recommend Microsoft's tool for work/school account or sync-client repair cases.
+- `escalate-to-event-viewer`: show a bounded manual event-log review path when the scanner cannot query logs.
 - `escalate-to-procmon-or-wpr`: when counters show pressure but folder evidence is inconclusive.
 
 Generated scripts should default to dry-run.
@@ -138,6 +189,7 @@ The policy should be data-driven in a config file so Microsoft limit changes can
 - No service installation in MVP.
 - No undocumented OneDrive database writes.
 - No log-content upload.
+- No automatic WPR, ProcMon, clean boot, service disablement, Windows Search disablement, Defender disablement, startup-item disablement, or Event Viewer log clearing.
 - No assumption that cloud deletion is reversible from the local Recycle Bin.
 - All move plans must verify destination free space before execution.
 
@@ -148,6 +200,8 @@ Unit tests:
 - Root discovery parsing.
 - Threshold policy.
 - Risk scoring.
+- Differential diagnosis classification.
+- Event-log query result mapping.
 - Report redaction.
 - Remediation script generation.
 
@@ -156,8 +210,10 @@ Integration tests:
 - Synthetic directory trees with hundreds of thousands of entries.
 - Inaccessible directory handling.
 - Long path handling.
+- Hidden and temporary sync-blocker detection.
 - High-risk development folder detection.
 - Counter-unavailable fallback.
+- Event-log unavailable and access-denied fallback.
 
 Performance tests:
 
@@ -165,6 +221,7 @@ Performance tests:
 - Idle priority is set before scanning.
 - Scanner can cancel promptly.
 - Subtree early-stop prevents unnecessary work once thresholds are exceeded.
+- Event-log correlation respects time and event-count bounds.
 
 Manual Windows validation:
 

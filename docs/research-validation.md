@@ -53,6 +53,56 @@ Sources:
 - [Windows Performance Recorder](https://learn.microsoft.com/en-us/windows-hardware/test/wpt/windows-performance-recorder)
 - [Windows Performance Analyzer](https://learn.microsoft.com/en-us/windows-hardware/test/wpt/windows-performance-analyzer)
 
+Microsoft's Event Viewer guidance says Windows logs and Applications and Services logs are a good place to start troubleshooting components. This supports adding a read-only event-log correlation pass before escalating to heavier trace capture.
+
+Sources:
+
+- [Event Viewer](https://learn.microsoft.com/en-us/shows/inside/event-viewer)
+- [EventLogReader Class](https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.eventing.reader.eventlogreader)
+- [EventLogQuery Class](https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.eventing.reader.eventlogquery)
+
+PowerShell `Get-Counter` reads Windows performance counters, documents sampling intervals and maximum sample counts, notes that some counter sets are ACL-protected, and documents localized counter names. It also shows PhysicalDisk paths including `Current Disk Queue Length` and `Avg. Disk Queue Length`. This validates disk-counter sampling, but also confirms that OneLag must treat missing, localized, or access-denied counters as degraded evidence.
+
+Source: [Get-Counter](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.diagnostics/get-counter)
+
+Microsoft's OneDrive "Processing changes" troubleshooting names several non-count causes: an open OneDrive file, many newly added files, a very large file, sign-in state, recent sign-in or computer update, hidden files, temporary files, and large files such as ZIP, video, PST, or OST files. This broadens the scanner beyond total item count and development-folder heuristics.
+
+Source: [Troubleshoot OneDrive sync issues: stuck on "Processing changes"](https://support.microsoft.com/en-US/onedrive/troubleshoot-onedrive-sync-issues-stuck-on-processing-changes)
+
+Microsoft's OneDrive "Sync pending" troubleshooting says hidden files can be the cause when no visible file explains the pending state, and warns that temporary files may still belong to another program. This supports detecting hidden and temporary-file clusters while keeping remediation advisory unless the user explicitly confirms an action.
+
+Source: [OneDrive is stuck on "Sync pending"](https://support.microsoft.com/en-US/onedrive/onedrive-is-stuck-on-sync-pending)
+
+Microsoft says the Support and Recovery Assistant can identify and fix several OneDrive for work or school sync issues. That is a better escalation path for account, tenant, or sync-client repair cases than custom automation in OneLag.
+
+Source: [Restrictions and limitations in OneDrive and SharePoint](https://support.microsoft.com/en-US/onedrive/restrictions-and-limitations-in-onedrive-and-sharepoint)
+
+Windows Performance Recorder's General profile records basic system and performance data, including CPU, context switches, disk I/O, hard faults, memory info, process counters, process/thread, ready threads, sampled profile, and thread priority. WPR also has resource-analysis profiles for CPU, disk I/O, file I/O, registry I/O, network I/O, heap, memory pool, virtual allocation, and power. This is the Microsoft-aligned deeper investigation path when simple local evidence is inconclusive.
+
+Sources:
+
+- [Recording for Basic System Diagnosis](https://learn.microsoft.com/en-us/windows-hardware/test/wpt/recording-for-basic-system-diagnosis)
+- [Recording for Resource-based Analysis](https://learn.microsoft.com/en-us/windows-hardware/test/wpt/recording-for-resource-based-analysis)
+
+## Deep Dive Cause Model
+
+The most likely OneDrive-linked cause is metadata pressure rather than raw storage size: too many tracked items, many newly added items, high-churn folders, hidden or temporary-file blockers, invalid names, long paths, large archive/media/mail data files, and account or update states that leave OneDrive processing changes for a long time. Development folders such as dependency caches, build outputs, virtual environments, and source-control metadata are especially risky because they create many small files and frequent writes.
+
+The likely Windows-visible failure mode is sustained resource pressure: OneDrive, Explorer shell extensions, Windows Search, Defender, build tools, browser caches, or Windows Update can all drive CPU or disk I/O. OneLag should not assume causality from a folder inventory alone. It should report a stronger conclusion only when static OneDrive risk aligns with live process, disk, log, or event evidence.
+
+The Explorer symptom is plausible but harder to prove from a low-impact scan. Microsoft documents shell extension handlers, including icon overlay handlers, and those handlers are queried before some shell actions. OneLag can detect conditions that make OneDrive shell integration suspect, but it should recommend Event Viewer, ProcMon, or WPR/WPA when Explorer hangs are present and the simple evidence does not isolate a cause.
+
+## Added Design Gaps
+
+The design now needs these additions:
+
+- A lightweight system-pressure snapshot that records total CPU, memory, disk free space, disk queue, OS version, OneDrive version, and whether current pressure appears OneDrive-dominated or broader system pressure.
+- A read-only Event Viewer correlation pass over recent Application, System, and OneDrive-relevant Applications and Services logs, with event messages redacted or summarized by default.
+- A differential-diagnosis result category for "OneDrive likely", "OneDrive possible", "OneDrive not proven", and "non-OneDrive pressure suspected".
+- Detection of OneDrive sync blockers beyond item count: long paths, invalid names, temporary files, hidden pending files, large archive/media/mail data files, and high-risk shortcut or synced-library patterns where observable locally.
+- Earlier expert escalation guidance for WPR/WPA and ProcMon, including privacy warnings and minimum useful capture profiles, without running heavy tracing by default.
+- A work/school account escalation recommendation to Microsoft Support and Recovery Assistant when the evidence points to account, tenant, or sync-client repair instead of local folder pressure.
+
 ## Design Conclusions
 
 The PDF's design is directionally sound, but the hard `300,000` rule needs nuance:
