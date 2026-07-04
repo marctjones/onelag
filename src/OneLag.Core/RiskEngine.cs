@@ -31,12 +31,16 @@ public sealed class RiskEngine
         var emergencyBlockers = significantBlockers.Count(blocker => blocker.Severity == Severity.Emergency);
         var capped = inventories.Any(inventory => inventory.WasCapped);
         var onedriveRunning = telemetry.OneDriveProcesses.Count > 0;
+        var onedriveCpuPercent = telemetry.OneDriveProcesses
+            .Where(process => process.CpuPercent.HasValue)
+            .Sum(process => process.CpuPercent.GetValueOrDefault());
         var logChurn = telemetry.OneDriveLogFilesChangedLastMinute;
         var resetWorthConsidering = clientHealth.ResetCommands.Count > 0
             && clientHealth.Signals.Any(signal => signal.Severity is Severity.Warning or Severity.HighRisk or Severity.Emergency);
         var recentWindowsEvents = eventLogs
             .Where(summary => summary.Level is "Critical" or "Error" or "Warning")
             .ToArray();
+        var pressureClassification = PressureClassifier.Classify(pressure);
 
         if (totalItems >= 1_000_000)
         {
@@ -104,7 +108,18 @@ public sealed class RiskEngine
             findings.Add(new Finding(
                 Severity.Info,
                 "OneDrive process is running",
-                $"{telemetry.OneDriveProcesses.Count:N0} OneDrive process instance(s) were observed.",
+                onedriveCpuPercent > 0
+                    ? $"{telemetry.OneDriveProcesses.Count:N0} OneDrive process instance(s) were observed using about {onedriveCpuPercent:N1}% CPU across sampled processes."
+                    : $"{telemetry.OneDriveProcesses.Count:N0} OneDrive process instance(s) were observed.",
+                "medium"));
+        }
+
+        if (onedriveCpuPercent >= 15)
+        {
+            findings.Add(new Finding(
+                Severity.Warning,
+                "OneDrive CPU usage was elevated during the sample",
+                $"OneDrive used about {onedriveCpuPercent:N1}% CPU across sampled processes.",
                 "medium"));
         }
 
@@ -119,6 +134,15 @@ public sealed class RiskEngine
                 Severity.Warning,
                 "OneDrive client cache reset is worth considering",
                 $"OneDrive client health metadata found reset-worthy signal(s): {topSignals}. OneLag did not parse or modify the internal sync database.",
+                "medium"));
+        }
+
+        if (pressureClassification.HasAnyPressure)
+        {
+            findings.Add(new Finding(
+                Severity.Warning,
+                "Whole-system performance pressure was observed",
+                string.Join("; ", pressureClassification.Evidence),
                 "medium"));
         }
 
@@ -138,7 +162,7 @@ public sealed class RiskEngine
         }
 
         var hasStaticOneDriveRisk = totalItems >= 200_000 || highRiskDirectories > 0 || highRiskBlockers > 0 || capped;
-        var hasLiveOneDriveRisk = (onedriveRunning && logChurn >= 5) || resetWorthConsidering;
+        var hasLiveOneDriveRisk = (onedriveRunning && logChurn >= 5) || onedriveCpuPercent >= 15 || resetWorthConsidering;
         var hasRecentWindowsEventRisk = recentWindowsEvents.Length > 0;
 
         var diagnosis = (hasStaticOneDriveRisk, hasLiveOneDriveRisk) switch
@@ -146,7 +170,7 @@ public sealed class RiskEngine
             (true, true) => DifferentialDiagnosis.OneDriveLikely,
             (true, false) => DifferentialDiagnosis.OneDrivePossible,
             (false, true) => DifferentialDiagnosis.OneDrivePossible,
-            _ when hasRecentWindowsEventRisk => DifferentialDiagnosis.NonOneDrivePressureSuspected,
+            _ when hasRecentWindowsEventRisk || pressureClassification.HasAnyPressure => DifferentialDiagnosis.NonOneDrivePressureSuspected,
             _ when pressure.EvidenceState.Contains("pressure", StringComparison.OrdinalIgnoreCase) => DifferentialDiagnosis.NonOneDrivePressureSuspected,
             _ => DifferentialDiagnosis.OneDriveNotProven
         };
@@ -218,6 +242,15 @@ public sealed class RiskEngine
                 "Consider a supported OneDrive reset",
                 "Microsoft documents OneDrive reset as a supported sync repair path that rebuilds the DAT cache after restart.",
                 "Run `onelag repair reset-onedrive` first to review the dry-run plan. Execute only after confirming sync status and work policy."));
+        }
+
+        if (pressureClassification.HasAnyPressure)
+        {
+            recommendations.Add(new Recommendation(
+                RecommendationKind.EscalateToProcmonOrWpr,
+                "Correlate system pressure before changing OneDrive data",
+                "CPU, memory, or disk pressure can make the laptop unresponsive even when OneDrive inventory risk is low.",
+                "Use the pressure evidence to decide whether WPR/WPA, Resource Monitor, or vendor driver/storage review is the next step."));
         }
 
         if (hasRecentWindowsEventRisk)

@@ -12,52 +12,44 @@ public sealed class WindowsPlatformProbe : PortablePlatformProbe
 
     public override TelemetrySnapshot CaptureTelemetry()
     {
-        var processes = new List<ProcessSample>();
-        foreach (var process in Process.GetProcessesByName("OneDrive"))
+        if (!OperatingSystem.IsWindows())
         {
-            using (process)
-            {
-                try
-                {
-                    processes.Add(new ProcessSample(
-                        process.ProcessName,
-                        process.Id,
-                        process.WorkingSet64,
-                        process.TotalProcessorTime,
-                        TryGetProcessPath(process)));
-                }
-                catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
-                {
-                    // Process exited or access was denied between enumeration and read.
-                }
-            }
+            return base.CaptureTelemetry();
         }
 
+        var processes = WindowsPerformanceSampler.SampleProcessesByName("OneDrive");
         var logChurn = CountOneDriveLogChurn();
         var version = processes.Select(sample => TryGetFileVersion(sample.Path)).FirstOrDefault(version => !string.IsNullOrWhiteSpace(version));
-        var evidenceState = OperatingSystem.IsWindows() ? "windows-process-and-log-metadata" : "portable-fallback";
+        var evidenceState = "windows-process-cpu-and-log-metadata";
         return new TelemetrySnapshot(DateTimeOffset.UtcNow, processes, logChurn, version, evidenceState);
     }
 
     public override SystemPressureSnapshot CaptureSystemPressure()
     {
-        var topProcesses = Process.GetProcesses()
-            .Select(TrySummarizeProcess)
-            .Where(summary => !string.IsNullOrWhiteSpace(summary))
-            .Order(StringComparer.OrdinalIgnoreCase)
-            .Take(20)
-            .Cast<string>()
+        if (!OperatingSystem.IsWindows())
+        {
+            return base.CaptureSystemPressure();
+        }
+
+        var signals = WindowsPerformanceSampler.CaptureSignals();
+        var topProcessSamples = WindowsPerformanceSampler.SampleTopProcesses(20);
+        var topProcesses = topProcessSamples
+            .Select(process => $"{process.Name}:{process.ProcessId}:cpu={process.CpuPercent:N1}:ws={process.WorkingSetBytes}")
             .ToArray();
 
         var driveState = TryGetSystemDriveState();
         return new SystemPressureSnapshot(
             DateTimeOffset.UtcNow,
-            "sampled-process-list-only",
-            "unknown",
-            driveState,
-            "unknown",
+            DescribeCpuState(signals),
+            DescribeMemoryState(signals),
+            DescribeDiskState(signals, driveState),
+            WindowsPerformanceSampler.CapturePowerState(),
             topProcesses,
-            OperatingSystem.IsWindows() ? "windows-low-cost-snapshot" : "portable-fallback");
+            signals.Any(signal => signal.Value.HasValue)
+                ? "windows-pdh-process-and-win32-memory-snapshot"
+                : "windows-performance-counters-unavailable",
+            signals,
+            topProcessSamples);
     }
 
     public override OneDriveClientHealthSnapshot CaptureOneDriveClientHealth(IReadOnlyList<RootCandidate> roots, TelemetrySnapshot telemetry)
@@ -405,21 +397,6 @@ public sealed class WindowsPlatformProbe : PortablePlatformProbe
         return string.IsNullOrWhiteSpace(localAppData) ? null : Path.Combine(localAppData, "Microsoft", "OneDrive", "settings");
     }
 
-    private static string? TrySummarizeProcess(Process process)
-    {
-        using (process)
-        {
-            try
-            {
-                return $"{process.ProcessName}:{process.Id}:ws={process.WorkingSet64}";
-            }
-            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
-            {
-                return null;
-            }
-        }
-    }
-
     private static string TryGetSystemDriveState()
     {
         try
@@ -438,6 +415,39 @@ public sealed class WindowsPlatformProbe : PortablePlatformProbe
         {
             return "unknown";
         }
+    }
+
+    private static string DescribeCpuState(IReadOnlyList<PerformanceSignal> signals)
+    {
+        var cpu = Value(signals, "processor-total-percent");
+        var queue = Value(signals, "processor-queue-length");
+        return $"processor={Format(cpu, "unknown")}% ; queue={Format(queue, "unknown")}";
+    }
+
+    private static string DescribeMemoryState(IReadOnlyList<PerformanceSignal> signals)
+    {
+        var available = Value(signals, "memory-available-mb");
+        var commit = Value(signals, "memory-commit-percent");
+        var paging = Value(signals, "paging-file-usage-percent");
+        return $"available={Format(available, "unknown")}MB ; commit={Format(commit, "unknown")}% ; paging={Format(paging, "unknown")}%";
+    }
+
+    private static string DescribeDiskState(IReadOnlyList<PerformanceSignal> signals, string driveState)
+    {
+        var queue = Value(signals, "physical-disk-queue-length");
+        var active = Value(signals, "physical-disk-active-percent");
+        var bytes = Value(signals, "physical-disk-bytes-per-second");
+        return $"queue={Format(queue, "unknown")} ; active={Format(active, "unknown")}% ; bytesPerSecond={Format(bytes, "unknown")} ; systemDrive={driveState}";
+    }
+
+    private static double? Value(IEnumerable<PerformanceSignal> signals, string kind)
+    {
+        return signals.FirstOrDefault(signal => signal.Kind.Equals(kind, StringComparison.OrdinalIgnoreCase))?.Value;
+    }
+
+    private static string Format(double? value, string fallback)
+    {
+        return value.HasValue ? value.Value.ToString("N1") : fallback;
     }
 
     private static IReadOnlyList<EventLogSummary> ReadRecentEventSummaries(string logName, long milliseconds)

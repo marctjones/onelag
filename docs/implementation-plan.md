@@ -78,12 +78,12 @@ Goal: correlate static folder risk with current OneDrive, whole-system, event-lo
 
 Tasks:
 
-- Collect OneDrive process CPU and memory samples.
-- Capture a low-cost whole-system pressure snapshot.
-- Collect disk queue counters when available.
-- Count OneDrive log-file churn by timestamp.
-- Query recent Application, System, and OneDrive-relevant event logs when available.
-- Degrade gracefully when counters or log paths are unavailable.
+- Collect OneDrive process CPU and memory samples. Status: implemented with bounded process CPU delta sampling.
+- Capture a low-cost whole-system pressure snapshot. Status: implemented with Windows PDH, Win32 memory, power, disk free-space, and process sampling where available.
+- Collect disk queue counters when available. Status: implemented with PDH `PhysicalDisk(_Total)` counters and graceful fallback.
+- Count OneDrive log-file churn by timestamp. Status: implemented.
+- Query recent Application, System, and OneDrive-relevant event logs when available. Status: implemented for Application and System summaries; OneDrive-specific Applications and Services logs remain future work.
+- Degrade gracefully when counters or log paths are unavailable. Status: implemented for current probes.
 - Add consecutive-sample rules to reduce false positives.
 
 Acceptance:

@@ -101,6 +101,20 @@ public sealed record ProcessSample(
     int ProcessId,
     long WorkingSetBytes,
     TimeSpan TotalProcessorTime,
+    string? Path,
+    double? CpuPercent = null);
+
+public sealed record PerformanceSignal(
+    string Kind,
+    double? Value,
+    string Unit,
+    string EvidenceState);
+
+public sealed record ProcessPressureSample(
+    string Name,
+    int ProcessId,
+    double CpuPercent,
+    long WorkingSetBytes,
     string? Path);
 
 public sealed record TelemetrySnapshot(
@@ -117,7 +131,9 @@ public sealed record SystemPressureSnapshot(
     string DiskState,
     string PowerState,
     IReadOnlyList<string> TopProcesses,
-    string EvidenceState);
+    string EvidenceState,
+    IReadOnlyList<PerformanceSignal>? Signals = null,
+    IReadOnlyList<ProcessPressureSample>? TopProcessSamples = null);
 
 public sealed record EventLogSummary(
     string LogName,

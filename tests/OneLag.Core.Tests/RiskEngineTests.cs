@@ -57,6 +57,34 @@ public sealed class RiskEngineTests
     }
 
     [Fact]
+    public void AnalyzeClassifiesStaticRiskAndOneDriveCpuAsLikely()
+    {
+        var inventory = new InventorySummary(
+            "C:\\Users\\test\\OneDrive",
+            1,
+            1,
+            0,
+            1,
+            false,
+            Array.Empty<string>(),
+            Array.Empty<TopLevelInventory>(),
+            new[] { new DirectoryRisk("C:\\Users\\test\\OneDrive\\repo\\node_modules", "node_modules", "test", 1) },
+            Array.Empty<SyncBlocker>());
+
+        var telemetry = new TelemetrySnapshot(
+            DateTimeOffset.UtcNow,
+            new[] { new ProcessSample("OneDrive", 123, 100, TimeSpan.FromSeconds(1), null, 22.5) },
+            0,
+            null,
+            "test");
+
+        var result = new RiskEngine().Analyze(new[] { inventory }, telemetry, EmptyPressure(), EmptyHealth());
+
+        Assert.Equal(DifferentialDiagnosis.OneDriveLikely, result.Diagnosis);
+        Assert.Contains(result.Findings, finding => finding.Title == "OneDrive CPU usage was elevated during the sample");
+    }
+
+    [Fact]
     public void AnalyzeDoesNotBlameOneDriveWithoutEvidence()
     {
         var inventory = new InventorySummary(
@@ -152,6 +180,42 @@ public sealed class RiskEngineTests
         Assert.Equal(DifferentialDiagnosis.NonOneDrivePressureSuspected, result.Diagnosis);
         Assert.Contains(result.Findings, finding => finding.Title == "Recent Windows reliability events were observed");
         Assert.Contains(result.Recommendations, recommendation => recommendation.Kind == RecommendationKind.EscalateToEventViewer);
+    }
+
+    [Fact]
+    public void AnalyzeClassifiesWholeSystemPressureAsNonOneDrivePressure()
+    {
+        var inventory = new InventorySummary(
+            "C:\\Users\\test\\OneDrive",
+            1,
+            1,
+            0,
+            1,
+            false,
+            Array.Empty<string>(),
+            Array.Empty<TopLevelInventory>(),
+            Array.Empty<DirectoryRisk>(),
+            Array.Empty<SyncBlocker>());
+        var pressure = new SystemPressureSnapshot(
+            DateTimeOffset.UtcNow,
+            "processor=40%;queue=0",
+            "available=512MB;commit=91%",
+            "queue=0;active=0%",
+            "source=ac",
+            Array.Empty<string>(),
+            "windows-pdh-process-and-win32-memory-snapshot",
+            new[]
+            {
+                new PerformanceSignal("memory-available-mb", 512, "megabytes", "test"),
+                new PerformanceSignal("memory-commit-percent", 91, "percent", "test")
+            },
+            Array.Empty<ProcessPressureSample>());
+
+        var result = new RiskEngine().Analyze(new[] { inventory }, EmptyTelemetry(), pressure, EmptyHealth());
+
+        Assert.Equal(DifferentialDiagnosis.NonOneDrivePressureSuspected, result.Diagnosis);
+        Assert.Contains(result.Findings, finding => finding.Title == "Whole-system performance pressure was observed");
+        Assert.Contains(result.Recommendations, recommendation => recommendation.Title == "Correlate system pressure before changing OneDrive data");
     }
 
     private static TelemetrySnapshot EmptyTelemetry()

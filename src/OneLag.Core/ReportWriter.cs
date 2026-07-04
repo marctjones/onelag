@@ -27,6 +27,10 @@ public static class ReportWriter
         builder.AppendLine($"- Diagnosis: `{report.Diagnosis}`");
         builder.AppendLine($"- Telemetry: `{report.Telemetry.EvidenceState}`");
         builder.AppendLine($"- System pressure: `{report.SystemPressure.EvidenceState}`");
+        builder.AppendLine($"- CPU: `{report.SystemPressure.CpuState}`");
+        builder.AppendLine($"- Memory: `{report.SystemPressure.MemoryState}`");
+        builder.AppendLine($"- Disk: `{report.SystemPressure.DiskState}`");
+        builder.AppendLine($"- Power: `{report.SystemPressure.PowerState}`");
         builder.AppendLine($"- OneDrive client health: `{report.OneDriveClientHealth.EvidenceState}`");
         builder.AppendLine();
 
@@ -89,6 +93,32 @@ public static class ReportWriter
         }
 
         builder.AppendLine();
+        builder.AppendLine("## System Performance");
+        var performanceSignals = report.SystemPressure.Signals ?? Array.Empty<PerformanceSignal>();
+        if (performanceSignals.Count == 0)
+        {
+            builder.AppendLine("- No structured Windows performance counter signals were available.");
+        }
+        else
+        {
+            foreach (var signal in performanceSignals)
+            {
+                builder.AppendLine($"- `{signal.Kind}`: `{FormatSignalValue(signal)}` `{signal.Unit}` ({signal.EvidenceState})");
+            }
+        }
+
+        var processSamples = report.SystemPressure.TopProcessSamples ?? Array.Empty<ProcessPressureSample>();
+        if (processSamples.Count > 0)
+        {
+            builder.AppendLine();
+            builder.AppendLine("Top sampled processes:");
+            foreach (var process in processSamples.Take(10))
+            {
+                builder.AppendLine($"- `{process.Name}` PID `{process.ProcessId}` CPU `{process.CpuPercent:N1}%` working set `{process.WorkingSetBytes:N0}` bytes");
+            }
+        }
+
+        builder.AppendLine();
         builder.AppendLine("## Recent Windows Events");
         if (report.EventLogs.Count == 0)
         {
@@ -126,10 +156,20 @@ public static class ReportWriter
         {
             foreach (var process in report.Telemetry.OneDriveProcesses)
             {
-                builder.AppendLine($"- `{process.Name}` PID `{process.ProcessId}` working set `{process.WorkingSetBytes:N0}` bytes CPU time `{process.TotalProcessorTime}`");
+                builder.AppendLine($"- `{process.Name}` PID `{process.ProcessId}` working set `{process.WorkingSetBytes:N0}` bytes CPU time `{process.TotalProcessorTime}` sampled CPU `{FormatOptionalPercent(process.CpuPercent)}`");
             }
         }
 
         return builder.ToString();
+    }
+
+    private static string FormatSignalValue(PerformanceSignal signal)
+    {
+        return signal.Value.HasValue ? signal.Value.Value.ToString("N1") : "unknown";
+    }
+
+    private static string FormatOptionalPercent(double? value)
+    {
+        return value.HasValue ? $"{value.Value:N1}%" : "unknown";
     }
 }

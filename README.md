@@ -121,6 +121,7 @@ Implemented in the current preview:
 - `onelag scan` with streaming inventory, high-risk directory detection, static sync-blocker detection, redacted Markdown/JSON reports, and conservative differential diagnosis.
 - Fuller OneDrive known-issue detection for invalid characters, leading/trailing spaces, blocked names, reserved device names, root `forms`, path-length limits, duplicate names, network/reparse sync roots, temporary files, PST/OST files, OneNote notebook files, preview-size limits, and large files.
 - OneDrive client-cache health metadata checks that avoid undocumented database parsing, report log/settings/DAT metadata, and offer a Microsoft-supported reset dry run.
+- Windows system-pressure sampling for OneDrive CPU, top-process CPU, memory availability/commit pressure, disk queue/active-time counters, paging-file usage, system-drive free space, and power source when available.
 - Recent Windows Event Viewer summary correlation for critical, error, and warning events when Windows can provide it.
 - `onelag watch` bounded foreground recorder with start, stop, status, mark, and report commands.
 - Cross-platform test framework with core unit tests, Windows-layer parser tests, CLI process tests, local macOS validation, Windows CI, and release-time Windows executable smoke tests.
@@ -131,6 +132,6 @@ Still roadmap work:
 
 - Native tray app and GUI.
 - Signed MSI/EXE installer.
-- Deeper Windows-only validation for performance counters, Files On-Demand states, WPR/WPA, and ProcMon escalation runbooks.
+- Deeper Windows-only validation for Files On-Demand states, WPR/WPA, and ProcMon escalation runbooks.
 - Automated remediation plan execution with confirmation and rollback notes.
 - Coverage reporting and broader integration tests on real Windows 11 systems.
