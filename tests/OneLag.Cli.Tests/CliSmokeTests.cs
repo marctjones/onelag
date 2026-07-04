@@ -87,6 +87,24 @@ public sealed class CliSmokeTests : IDisposable
         Assert.Contains("Safety:", result.StandardOutput);
     }
 
+    [Fact]
+    public async Task SupportTracePlanWritesEscalationRunbooks()
+    {
+        var output = Path.Combine(tempRoot, "trace-plan");
+
+        var result = await RunCli("support", "trace-plan", "--output", output);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.True(File.Exists(Path.Combine(output, "README.md")));
+        Assert.True(File.Exists(Path.Combine(output, "Start-OneLagWprTrace.ps1")));
+        Assert.True(File.Exists(Path.Combine(output, "Stop-OneLagWprTrace.ps1")));
+        Assert.True(File.Exists(Path.Combine(output, "Cancel-OneLagWprTrace.ps1")));
+        Assert.True(File.Exists(Path.Combine(output, "ProcMon-OneLag-Filters.md")));
+        Assert.Contains("Trace escalation plan", result.StandardOutput);
+        Assert.Contains("wpr -start GeneralProfile.light", await File.ReadAllTextAsync(Path.Combine(output, "Start-OneLagWprTrace.ps1")));
+        Assert.Contains("Drop Filtered Events", await File.ReadAllTextAsync(Path.Combine(output, "ProcMon-OneLag-Filters.md")));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(tempRoot))

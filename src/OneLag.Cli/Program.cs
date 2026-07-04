@@ -45,6 +45,7 @@ internal static class Program
                 "scan" => RunScan(args[1..], cancellation.Token),
                 "watch" => await RunWatch(args[1..], cancellation.Token),
                 "repair" => RunRepair(args[1..]),
+                "support" => RunSupport(args[1..]),
                 "interactive" => await RunInteractive(cancellation.Token),
                 "version" => RunVersion(),
                 _ => UnknownCommand(args[0])
@@ -157,6 +158,48 @@ internal static class Program
             "reset-onedrive" => RunResetOneDrive(args[1..]),
             _ => UnknownCommand($"repair {args[0]}")
         };
+    }
+
+    private static int RunSupport(string[] args)
+    {
+        if (args.Length == 0 || args[0] is "-h" or "--help" or "help")
+        {
+            PrintSupportHelp();
+            return 0;
+        }
+
+        return args[0].ToLowerInvariant() switch
+        {
+            "trace-plan" => RunTracePlan(args[1..]),
+            _ => UnknownCommand($"support {args[0]}")
+        };
+    }
+
+    private static int RunTracePlan(string[] args)
+    {
+        var output = "onelag-trace-plan";
+
+        for (var i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--output":
+                case "-o":
+                    output = RequireValue(args, ref i, args[i]);
+                    break;
+                default:
+                    throw new ArgumentException($"Unknown support trace-plan argument '{args[i]}'.");
+            }
+        }
+
+        var files = EscalationPlanWriter.WriteTracePlan(output);
+        Console.WriteLine($"Trace escalation plan: {Path.GetFullPath(output)}");
+        foreach (var file in files)
+        {
+            Console.WriteLine($"- {file}");
+        }
+
+        return 0;
     }
 
     private static int RunResetOneDrive(string[] args)
@@ -422,6 +465,7 @@ internal static class Program
         Console.WriteLine("2. Start watch mode");
         Console.WriteLine("3. Mark lag now");
         Console.WriteLine("4. Review OneDrive reset plan");
+        Console.WriteLine("5. Generate WPR/ProcMon trace escalation plan");
         Console.Write("Choice: ");
         var choice = Console.ReadLine();
 
@@ -431,6 +475,7 @@ internal static class Program
             "2" => await WatchStart(Array.Empty<string>(), cancellationToken),
             "3" => WatchMark(Array.Empty<string>()),
             "4" => RunResetOneDrive(Array.Empty<string>()),
+            "5" => RunTracePlan(Array.Empty<string>()),
             _ => 1
         };
     }
@@ -630,6 +675,7 @@ internal static class Program
           watch mark [--output DIR] [--note TEXT]
           watch report [--output DIR] [--report PATH]
           repair reset-onedrive [--execute --i-understand-reset-disconnects-sync]
+          support trace-plan [--output DIR]
           interactive
           version
         """);
@@ -659,6 +705,19 @@ internal static class Program
 
         Execution:
           reset-onedrive --execute --i-understand-reset-disconnects-sync
+        """);
+    }
+
+    private static void PrintSupportHelp()
+    {
+        Console.WriteLine("""
+        OneLag support
+
+        Commands:
+          trace-plan   Generate local WPR/WPA and ProcMon escalation runbooks and helper scripts.
+
+        Safety:
+          The generated plan does not start tracing. Review the files, then run the WPR scripts manually on Windows.
         """);
     }
 }

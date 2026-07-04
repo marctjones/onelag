@@ -63,6 +63,12 @@ Execute the first supported reset command candidate only after reviewing the dry
 onelag repair reset-onedrive --execute --i-understand-reset-disconnects-sync
 ```
 
+Generate WPR/WPA and ProcMon escalation runbooks for unresolved responsiveness pressure:
+
+```powershell
+onelag support trace-plan --output onelag-trace-plan
+```
+
 ## Local Validation
 
 Run the macOS-friendly validation suite from the repository root:
@@ -123,6 +129,7 @@ Implemented in the current preview:
 - OneDrive client-cache health metadata checks that avoid undocumented database parsing, report log/settings/DAT metadata, and offer a Microsoft-supported reset dry run.
 - Windows system-pressure sampling for OneDrive CPU, top-process CPU, memory availability/commit pressure, disk queue/active-time counters, paging-file usage, system-drive free space, and power source when available.
 - Recent Windows Event Viewer summary correlation for critical, error, and warning events when Windows can provide it.
+- WPR/WPA and ProcMon escalation-plan generation for inconclusive responsiveness pressure, without automatically starting heavy tracing.
 - `onelag watch` bounded foreground recorder with start, stop, status, mark, and report commands.
 - Cross-platform test framework with core unit tests, Windows-layer parser tests, CLI process tests, local macOS validation, Windows CI, and release-time Windows executable smoke tests.
 - Windows x64 self-contained publish and PowerShell installer bundle.
