@@ -73,6 +73,10 @@ Microsoft's OneDrive "Sync pending" troubleshooting says hidden files can be the
 
 Source: [OneDrive is stuck on "Sync pending"](https://support.microsoft.com/en-US/onedrive/onedrive-is-stuck-on-sync-pending)
 
+The implemented known-issue scanner maps Microsoft's OneDrive restrictions into specific local detector kinds: invalid characters, leading/trailing spaces, blocked names, reserved Windows device names, root-level `forms`, path and segment length limits, duplicate names, network or junction sync locations, temporary TMP files, PST/OST caveats, moved OneNote notebook files, preview-size limits, and over-limit individual files. These are advisory diagnostics only; OneLag does not rename, move, unlink, or reset anything automatically.
+
+Source: [Restrictions and limitations in OneDrive and SharePoint](https://support.microsoft.com/en-US/onedrive/restrictions-and-limitations-in-onedrive-and-sharepoint)
+
 Microsoft says the Support and Recovery Assistant can identify and fix several OneDrive for work or school sync issues. That is a better escalation path for account, tenant, or sync-client repair cases than custom automation in OneLag.
 
 Source: [Restrictions and limitations in OneDrive and SharePoint](https://support.microsoft.com/en-US/onedrive/restrictions-and-limitations-in-onedrive-and-sharepoint)

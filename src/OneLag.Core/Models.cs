@@ -29,7 +29,8 @@ public enum RecommendationKind
     ResetOneDrive,
     SupportAndRecoveryAssistant,
     EscalateToEventViewer,
-    EscalateToProcmonOrWpr
+    EscalateToProcmonOrWpr,
+    ReviewUnsupportedConfiguration
 }
 
 public enum EpisodeCategory

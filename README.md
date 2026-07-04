@@ -91,10 +91,11 @@ The first implementation target is a .NET Windows console application because th
 
 The repository contains the source PDF, design documentation, development guardrails, live milestones/issues [#1](https://github.com/marctjones/onelag/issues/1)-[#60](https://github.com/marctjones/onelag/issues/60), and an initial .NET implementation.
 
-Implemented in the first preview:
+Implemented in the current preview:
 
 - .NET solution split into core, Windows platform probe, CLI, and tests.
 - `onelag scan` with streaming inventory, high-risk directory detection, static sync-blocker detection, redacted Markdown/JSON reports, and conservative differential diagnosis.
+- Fuller OneDrive known-issue detection for invalid characters, leading/trailing spaces, blocked names, reserved device names, root `forms`, path-length limits, duplicate names, network/reparse sync roots, temporary files, PST/OST files, OneNote notebook files, preview-size limits, and large files.
 - `onelag watch` bounded foreground recorder with start, stop, status, mark, and report commands.
 - Windows x64 self-contained publish and PowerShell installer bundle.
 - GitHub Actions release workflow for test, publish, package, and release artifacts.

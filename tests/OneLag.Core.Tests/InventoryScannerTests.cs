@@ -32,7 +32,38 @@ public sealed class InventoryScannerTests : IDisposable
         var summary = new InventoryScanner().Scan(root, 10_000, CancellationToken.None);
 
         Assert.Contains(summary.SyncBlockers, blocker => blocker.Kind == "temporary-file");
+        Assert.Contains(summary.SyncBlockers, blocker => blocker.Kind == "mail-data-file");
         Assert.DoesNotContain(summary.SyncBlockers, blocker => blocker.Kind == "large-risk-file");
+    }
+
+    [Fact]
+    public void ScanDetectsKnownOneDriveBlockedNames()
+    {
+        Directory.CreateDirectory(Path.Combine(root, "forms"));
+        Directory.CreateDirectory(Path.Combine(root, "project_vti_cache"));
+        File.WriteAllText(Path.Combine(root, ".lock"), "lock");
+        File.WriteAllText(Path.Combine(root, "desktop.ini"), "desktop");
+        File.WriteAllText(Path.Combine(root, "~$draft.docx"), "office");
+        File.WriteAllText(Path.Combine(root, "notes.one"), "onenote");
+
+        var summary = new InventoryScanner().Scan(root, 10_000, CancellationToken.None);
+
+        Assert.Contains(summary.SyncBlockers, blocker => blocker.Kind == "blocked-name");
+        Assert.Contains(summary.SyncBlockers, blocker => blocker.Kind == "root-forms-name");
+        Assert.Contains(summary.SyncBlockers, blocker => blocker.Kind == "onenote-notebook-file");
+    }
+
+    [Fact]
+    public void KnownIssueRulesFlagInvalidCharactersAndLongPathsWithoutFilesystemSupport()
+    {
+        var rootPath = @"C:\Users\test\OneDrive";
+        var relativePath = new string('a', OneDriveKnownIssueRules.MaximumDecodedRelativePathLength + 1);
+        var path = Path.Combine(rootPath, relativePath, "bad:name.txt");
+
+        var blockers = OneDriveKnownIssueRules.InspectEntry(rootPath, path, "bad:name.txt", FileAttributes.Archive, false, 1);
+
+        Assert.Contains(blockers, blocker => blocker.Kind == "invalid-character");
+        Assert.Contains(blockers, blocker => blocker.Kind == "long-onedrive-relative-path");
     }
 
     [Fact]

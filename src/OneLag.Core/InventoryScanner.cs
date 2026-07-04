@@ -26,49 +26,6 @@ public sealed class InventoryScanner
         ".terraform"
     };
 
-    private static readonly HashSet<string> LargeRiskExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".pst",
-        ".ost",
-        ".zip",
-        ".7z",
-        ".rar",
-        ".tar",
-        ".gz",
-        ".mp4",
-        ".mov",
-        ".mkv",
-        ".iso",
-        ".vhd",
-        ".vhdx"
-    };
-
-    private static readonly HashSet<string> ReservedWindowsNames = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "CON",
-        "PRN",
-        "AUX",
-        "NUL",
-        "COM1",
-        "COM2",
-        "COM3",
-        "COM4",
-        "COM5",
-        "COM6",
-        "COM7",
-        "COM8",
-        "COM9",
-        "LPT1",
-        "LPT2",
-        "LPT3",
-        "LPT4",
-        "LPT5",
-        "LPT6",
-        "LPT7",
-        "LPT8",
-        "LPT9"
-    };
-
     public InventorySummary Scan(string root, int maxItems, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(root))
@@ -89,6 +46,7 @@ public sealed class InventoryScanner
         var capped = false;
 
         stack.Push((normalizedRoot, 0));
+        blockers.AddRange(OneDriveKnownIssueRules.InspectRoot(normalizedRoot));
 
         while (stack.Count > 0)
         {
@@ -122,6 +80,9 @@ public sealed class InventoryScanner
                 continue;
             }
 
+            var seenNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var childEntryCount = 0;
+
             foreach (var entry in entries)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -132,6 +93,7 @@ public sealed class InventoryScanner
                     break;
                 }
 
+                childEntryCount++;
                 FileAttributes attributes;
                 try
                 {
@@ -144,9 +106,20 @@ public sealed class InventoryScanner
                 }
 
                 var name = Path.GetFileName(entry);
-                AddPathBlockers(blockers, entry, name, attributes);
+                var isDirectory = (attributes & FileAttributes.Directory) == FileAttributes.Directory;
+                var normalizedName = name.Normalize();
+                if (seenNames.TryGetValue(normalizedName, out var existingEntry))
+                {
+                    blockers.Add(OneDriveKnownIssueRules.CreateDuplicateNameBlocker(entry, existingEntry));
+                }
+                else
+                {
+                    seenNames[normalizedName] = entry;
+                }
 
-                if ((attributes & FileAttributes.Directory) == FileAttributes.Directory)
+                blockers.AddRange(OneDriveKnownIssueRules.InspectEntry(normalizedRoot, entry, name, attributes, isDirectory, depth));
+
+                if (isDirectory)
                 {
                     directoryCount++;
 
@@ -171,13 +144,18 @@ public sealed class InventoryScanner
                     {
                         var info = new FileInfo(entry);
                         totalBytes += Math.Max(0, info.Length);
-                        AddFileBlockers(blockers, entry, info);
+                        blockers.AddRange(OneDriveKnownIssueRules.InspectFile(entry, info));
                     }
                     catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or FileNotFoundException or PathTooLongException)
                     {
                         inaccessible.Add(entry);
                     }
                 }
+            }
+
+            if (childEntryCount > 50_000)
+            {
+                blockers.Add(OneDriveKnownIssueRules.CreateLargeFolderSharingBlocker(currentDirectory, childEntryCount));
             }
         }
 
@@ -190,48 +168,20 @@ public sealed class InventoryScanner
             capped,
             inaccessible,
             risks.Values.OrderBy(risk => risk.Path, StringComparer.OrdinalIgnoreCase).ToArray(),
-            blockers.Take(250).ToArray());
+            blockers
+                .OrderByDescending(blocker => SeverityRank(blocker.Severity))
+                .ThenBy(blocker => blocker.Kind, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(blocker => blocker.Path, StringComparer.OrdinalIgnoreCase)
+                .Take(500)
+                .ToArray());
     }
 
-    private static void AddPathBlockers(List<SyncBlocker> blockers, string path, string name, FileAttributes attributes)
+    private static int SeverityRank(Severity severity) => severity switch
     {
-        if (path.Length > 400)
-        {
-            blockers.Add(new SyncBlocker(path, "long-path", "Decoded OneDrive paths over 400 characters are sync risks.", Severity.Warning));
-        }
-
-        if (name.Length > 255)
-        {
-            blockers.Add(new SyncBlocker(path, "long-segment", "Path segment exceeds the common 255-character segment limit.", Severity.HighRisk));
-        }
-
-        var baseName = Path.GetFileNameWithoutExtension(name);
-        if (ReservedWindowsNames.Contains(baseName))
-        {
-            blockers.Add(new SyncBlocker(path, "reserved-name", "Reserved Windows device name cannot safely sync.", Severity.HighRisk));
-        }
-
-        if (name is ".lock" or "_vti_" or "desktop.ini" || name.StartsWith("~$", StringComparison.Ordinal))
-        {
-            blockers.Add(new SyncBlocker(path, "blocked-name", "Name is blocked or special-cased by OneDrive guidance.", Severity.Warning));
-        }
-
-        if ((attributes & FileAttributes.Hidden) == FileAttributes.Hidden)
-        {
-            blockers.Add(new SyncBlocker(path, "hidden", "Hidden files can explain sync-pending states when no visible file appears responsible.", Severity.Info));
-        }
-    }
-
-    private static void AddFileBlockers(List<SyncBlocker> blockers, string path, FileInfo info)
-    {
-        if (info.Extension.Equals(".tmp", StringComparison.OrdinalIgnoreCase) || info.Name.EndsWith(".temp", StringComparison.OrdinalIgnoreCase))
-        {
-            blockers.Add(new SyncBlocker(path, "temporary-file", "Temporary files can block or prolong OneDrive sync and may belong to another app.", Severity.Warning));
-        }
-
-        if (LargeRiskExtensions.Contains(info.Extension) && info.Length >= 250L * 1024 * 1024)
-        {
-            blockers.Add(new SyncBlocker(path, "large-risk-file", "Large archive, media, or mail data files can prolong processing changes.", Severity.Warning));
-        }
-    }
+        Severity.Emergency => 4,
+        Severity.HighRisk => 3,
+        Severity.Warning => 2,
+        Severity.Info => 1,
+        _ => 0
+    };
 }

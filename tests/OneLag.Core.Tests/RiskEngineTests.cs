@@ -72,6 +72,27 @@ public sealed class RiskEngineTests
         Assert.Equal(DifferentialDiagnosis.OneDriveNotProven, result.Diagnosis);
     }
 
+    [Fact]
+    public void AnalyzeAddsKnownRestrictionFindingForSpecificSyncBlockers()
+    {
+        var inventory = new InventorySummary(
+            "C:\\Users\\test\\OneDrive",
+            1,
+            1,
+            0,
+            1,
+            false,
+            Array.Empty<string>(),
+            Array.Empty<DirectoryRisk>(),
+            new[] { new SyncBlocker("C:\\Users\\test\\OneDrive\\bad:name.txt", "invalid-character", "test", Severity.HighRisk) });
+
+        var result = new RiskEngine().Analyze(new[] { inventory }, EmptyTelemetry(), EmptyPressure());
+
+        Assert.Equal(DifferentialDiagnosis.OneDrivePossible, result.Diagnosis);
+        Assert.Contains(result.Findings, finding => finding.Title == "Known OneDrive restriction issues were found");
+        Assert.Contains(result.Recommendations, recommendation => recommendation.Title == "Rename or shorten items that violate OneDrive restrictions");
+    }
+
     private static TelemetrySnapshot EmptyTelemetry()
     {
         return new TelemetrySnapshot(DateTimeOffset.UtcNow, Array.Empty<ProcessSample>(), 0, null, "test");

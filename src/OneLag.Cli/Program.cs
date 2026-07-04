@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using OneLag.Core;
@@ -336,7 +337,11 @@ internal static class Program
 
     private static int RunVersion()
     {
-        var version = typeof(Program).Assembly.GetName().Version?.ToString() ?? "unknown";
+        var version = typeof(Program).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+            .InformationalVersion
+            ?? typeof(Program).Assembly.GetName().Version?.ToString()
+            ?? "unknown";
         Console.WriteLine($"OneLag {version}");
         return 0;
     }

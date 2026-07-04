@@ -82,9 +82,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" `
-            artifacts/*installer.zip `
-            artifacts/*installer.zip.sha256 `
-            --repo "${{ github.repository }}" `
-            --title "OneLag ${{ github.ref_name }}" `
-            --notes "First installable OneLag preview. Includes self-contained Windows x64 CLI, one-shot scan, report generation, and bounded watch-mode recorder foundation."
+          $notes = "OneLag installable preview. Includes self-contained Windows x64 CLI, one-shot scan, fuller OneDrive known-issue detection, report generation, and bounded watch-mode recorder foundation."
+          if ("${{ github.ref_name }}".Contains("-")) {
+            gh release create "${{ github.ref_name }}" `
+              artifacts/*installer.zip `
+              artifacts/*installer.zip.sha256 `
+              --repo "${{ github.repository }}" `
+              --title "OneLag ${{ github.ref_name }}" `
+              --notes $notes `
+              --prerelease
+          } else {
+            gh release create "${{ github.ref_name }}" `
+              artifacts/*installer.zip `
+              artifacts/*installer.zip.sha256 `
+              --repo "${{ github.repository }}" `
+              --title "OneLag ${{ github.ref_name }}" `
+              --notes $notes
+          }
