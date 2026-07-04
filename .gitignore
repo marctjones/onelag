@@ -1,0 +1,13 @@
+tmp/
+bin/
+obj/
+.vs/
+.vscode/
+TestResults/
+*.user
+*.suo
+*.log
+*.etl
+*.dmp
+*.zip
+*.nupkg
