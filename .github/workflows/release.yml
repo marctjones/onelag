@@ -70,6 +70,34 @@ jobs:
           if (!(Test-Path $report)) {
             throw "scan smoke did not create report"
           }
+          $viewOutput = & $exe view --report $report
+          if ($LASTEXITCODE -ne 0) {
+            throw "view smoke failed with exit code $LASTEXITCODE"
+          }
+          if (($viewOutput -join "`n") -notmatch "Kind: Diagnostic") {
+            throw "view smoke did not identify diagnostic report"
+          }
+          $watch = Join-Path $env:RUNNER_TEMP "OneLagWatchSmoke"
+          $watchReport = Join-Path $env:RUNNER_TEMP "onelag-watch-smoke.md"
+          & $exe watch start --duration 1s --interval 1s --output $watch
+          if ($LASTEXITCODE -ne 0) {
+            throw "watch start smoke failed with exit code $LASTEXITCODE"
+          }
+          & $exe watch mark --output $watch --note "release"
+          if ($LASTEXITCODE -ne 0) {
+            throw "watch mark smoke failed with exit code $LASTEXITCODE"
+          }
+          & $exe watch report --output $watch --report $watchReport
+          if ($LASTEXITCODE -ne 0) {
+            throw "watch report smoke failed with exit code $LASTEXITCODE"
+          }
+          $watchViewOutput = & $exe view --report $watchReport --timeline
+          if ($LASTEXITCODE -ne 0) {
+            throw "watch view smoke failed with exit code $LASTEXITCODE"
+          }
+          if (($watchViewOutput -join "`n") -notmatch "Kind: Watch") {
+            throw "watch view smoke did not identify watch report"
+          }
           & $exe repair reset-onedrive
           if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 1) {
             throw "repair dry-run returned unexpected exit code $LASTEXITCODE"
