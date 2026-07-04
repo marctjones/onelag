@@ -34,10 +34,11 @@ public sealed class InventoryScanner
         }
 
         var normalizedRoot = Path.GetFullPath(root);
-        var stack = new Stack<(string Path, int Depth)>();
+        var stack = new Stack<(string Path, int Depth, string? TopLevelPath, string? TopLevelName)>();
         var inaccessible = new List<string>();
         var risks = new Dictionary<string, DirectoryRisk>(StringComparer.OrdinalIgnoreCase);
         var blockers = new List<SyncBlocker>();
+        var topLevelItems = new Dictionary<string, TopLevelInventoryBuilder>(StringComparer.OrdinalIgnoreCase);
 
         long fileCount = 0;
         long directoryCount = 0;
@@ -45,7 +46,7 @@ public sealed class InventoryScanner
         var maxDepth = 0;
         var capped = false;
 
-        stack.Push((normalizedRoot, 0));
+        stack.Push((normalizedRoot, 0, null, null));
         blockers.AddRange(OneDriveKnownIssueRules.InspectRoot(normalizedRoot));
 
         while (stack.Count > 0)
@@ -58,7 +59,7 @@ public sealed class InventoryScanner
                 break;
             }
 
-            var (currentDirectory, depth) = stack.Pop();
+            var (currentDirectory, depth, currentTopLevelPath, currentTopLevelName) = stack.Pop();
             maxDepth = Math.Max(maxDepth, depth);
 
             IEnumerable<string> entries;
@@ -107,6 +108,8 @@ public sealed class InventoryScanner
 
                 var name = Path.GetFileName(entry);
                 var isDirectory = (attributes & FileAttributes.Directory) == FileAttributes.Directory;
+                var entryTopLevelPath = currentTopLevelPath ?? entry;
+                var entryTopLevelName = currentTopLevelName ?? name;
                 var normalizedName = name.Normalize();
                 if (seenNames.TryGetValue(normalizedName, out var existingEntry))
                 {
@@ -122,6 +125,7 @@ public sealed class InventoryScanner
                 if (isDirectory)
                 {
                     directoryCount++;
+                    GetTopLevel(topLevelItems, entryTopLevelPath, entryTopLevelName).DirectoryCount++;
 
                     if (HighRiskDirectoryNames.Contains(name))
                     {
@@ -134,16 +138,19 @@ public sealed class InventoryScanner
                         continue;
                     }
 
-                    stack.Push((entry, depth + 1));
+                    stack.Push((entry, depth + 1, entryTopLevelPath, entryTopLevelName));
                 }
                 else
                 {
                     fileCount++;
+                    var topLevel = GetTopLevel(topLevelItems, entryTopLevelPath, entryTopLevelName);
+                    topLevel.FileCount++;
 
                     try
                     {
                         var info = new FileInfo(entry);
                         totalBytes += Math.Max(0, info.Length);
+                        topLevel.TotalBytes += Math.Max(0, info.Length);
                         blockers.AddRange(OneDriveKnownIssueRules.InspectFile(entry, info));
                     }
                     catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or FileNotFoundException or PathTooLongException)
@@ -167,6 +174,11 @@ public sealed class InventoryScanner
             maxDepth,
             capped,
             inaccessible,
+            topLevelItems.Values
+                .Select(item => item.ToInventory())
+                .OrderByDescending(item => item.TotalItems)
+                .ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+                .ToArray(),
             risks.Values.OrderBy(risk => risk.Path, StringComparer.OrdinalIgnoreCase).ToArray(),
             blockers
                 .OrderByDescending(blocker => SeverityRank(blocker.Severity))
@@ -184,4 +196,42 @@ public sealed class InventoryScanner
         Severity.Info => 1,
         _ => 0
     };
+
+    private static TopLevelInventoryBuilder GetTopLevel(
+        Dictionary<string, TopLevelInventoryBuilder> topLevelItems,
+        string path,
+        string name)
+    {
+        if (!topLevelItems.TryGetValue(path, out var item))
+        {
+            item = new TopLevelInventoryBuilder(path, name);
+            topLevelItems[path] = item;
+        }
+
+        return item;
+    }
+
+    private sealed class TopLevelInventoryBuilder
+    {
+        public TopLevelInventoryBuilder(string path, string name)
+        {
+            Path = path;
+            Name = name;
+        }
+
+        public string Path { get; }
+
+        public string Name { get; }
+
+        public long FileCount { get; set; }
+
+        public long DirectoryCount { get; set; }
+
+        public long TotalBytes { get; set; }
+
+        public TopLevelInventory ToInventory()
+        {
+            return new TopLevelInventory(Path, Name, FileCount, DirectoryCount, TotalBytes);
+        }
+    }
 }

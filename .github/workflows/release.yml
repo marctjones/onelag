@@ -53,6 +53,27 @@ jobs:
             -p:Version=${{ steps.version.outputs.version }} `
             --output artifacts/publish/win-x64
 
+      - name: Smoke published Windows executable
+        shell: pwsh
+        run: |
+          $exe = Join-Path $PWD "artifacts/publish/win-x64/onelag.exe"
+          & $exe version
+          $root = Join-Path $env:RUNNER_TEMP "OneLagReleaseSmokeRoot"
+          $report = Join-Path $env:RUNNER_TEMP "onelag-release-report.md"
+          New-Item -ItemType Directory -Force -Path (Join-Path $root "Documents") | Out-Null
+          "content" | Set-Content (Join-Path $root "Documents/file.txt")
+          & $exe scan --root $root --output $report --max-items 1000
+          if ($LASTEXITCODE -ne 0) {
+            throw "scan smoke failed with exit code $LASTEXITCODE"
+          }
+          if (!(Test-Path $report)) {
+            throw "scan smoke did not create report"
+          }
+          & $exe repair reset-onedrive
+          if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 1) {
+            throw "repair dry-run returned unexpected exit code $LASTEXITCODE"
+          }
+
       - name: Create installer bundle
         shell: pwsh
         run: |

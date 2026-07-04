@@ -178,9 +178,15 @@ public static class OneDriveKnownIssueRules
             blockers.Add(new SyncBlocker(path, "reserved-name", "Reserved Windows device names are not allowed in OneDrive.", Severity.HighRisk));
         }
 
-        if (normalizedName.Equals(".lock", StringComparison.OrdinalIgnoreCase)
-            || normalizedName.Equals("desktop.ini", StringComparison.OrdinalIgnoreCase)
-            || normalizedName.StartsWith("~$", StringComparison.Ordinal)
+        if (normalizedName.Equals("desktop.ini", StringComparison.OrdinalIgnoreCase))
+        {
+            blockers.Add(new SyncBlocker(path, "desktop-ini-metadata", "Windows Explorer metadata file. OneDrive treats this as a special restricted name, but it is common and usually not a root cause by itself.", Severity.Info));
+        }
+        else if (normalizedName.StartsWith("~$", StringComparison.Ordinal))
+        {
+            blockers.Add(new SyncBlocker(path, "office-temp-name", "Office temporary lock files can leave sync pending evidence while a document is open.", Severity.Warning));
+        }
+        else if (normalizedName.Equals(".lock", StringComparison.OrdinalIgnoreCase)
             || normalizedName.Contains("_vti_", StringComparison.OrdinalIgnoreCase))
         {
             blockers.Add(new SyncBlocker(path, "blocked-name", "The name is blocked or special-cased by OneDrive restrictions.", Severity.HighRisk));

@@ -20,6 +20,7 @@ public sealed class InventoryScannerTests : IDisposable
         var summary = new InventoryScanner().Scan(root, 10_000, CancellationToken.None);
 
         Assert.Contains(summary.HighRiskDirectories, risk => risk.Name == "node_modules");
+        Assert.Contains(summary.TopLevelItems, item => item.Name == "project" && item.TotalItems == 3);
         Assert.Equal(1, summary.FileCount);
     }
 
@@ -49,6 +50,8 @@ public sealed class InventoryScannerTests : IDisposable
         var summary = new InventoryScanner().Scan(root, 10_000, CancellationToken.None);
 
         Assert.Contains(summary.SyncBlockers, blocker => blocker.Kind == "blocked-name");
+        Assert.Contains(summary.SyncBlockers, blocker => blocker.Kind == "desktop-ini-metadata" && blocker.Severity == Severity.Info);
+        Assert.Contains(summary.SyncBlockers, blocker => blocker.Kind == "office-temp-name" && blocker.Severity == Severity.Warning);
         Assert.Contains(summary.SyncBlockers, blocker => blocker.Kind == "root-forms-name");
         Assert.Contains(summary.SyncBlockers, blocker => blocker.Kind == "onenote-notebook-file");
     }

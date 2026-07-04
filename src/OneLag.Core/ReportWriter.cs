@@ -52,6 +52,11 @@ public static class ReportWriter
             builder.AppendLine($"- Sync blockers: `{inventory.SyncBlockers.Count:N0}`");
             builder.AppendLine();
 
+            foreach (var topLevel in inventory.TopLevelItems.Take(12))
+            {
+                builder.AppendLine($"- Top-level item: `{redactor.PathValue(topLevel.Path)}` files `{topLevel.FileCount:N0}`, directories `{topLevel.DirectoryCount:N0}`, bytes `{topLevel.TotalBytes:N0}`");
+            }
+
             foreach (var group in inventory.SyncBlockers.GroupBy(blocker => blocker.Kind).OrderByDescending(group => group.Count()).ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase).Take(12))
             {
                 builder.AppendLine($"- Known issue `{group.Key}`: `{group.Count():N0}` item(s)");

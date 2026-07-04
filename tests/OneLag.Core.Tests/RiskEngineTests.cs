@@ -15,6 +15,7 @@ public sealed class RiskEngineTests
             1,
             false,
             Array.Empty<string>(),
+            Array.Empty<TopLevelInventory>(),
             Array.Empty<DirectoryRisk>(),
             Array.Empty<SyncBlocker>());
 
@@ -39,6 +40,7 @@ public sealed class RiskEngineTests
             1,
             false,
             Array.Empty<string>(),
+            Array.Empty<TopLevelInventory>(),
             new[] { new DirectoryRisk("C:\\Users\\test\\OneDrive\\repo\\.git", ".git", "test", 1) },
             Array.Empty<SyncBlocker>());
 
@@ -65,6 +67,7 @@ public sealed class RiskEngineTests
             1,
             false,
             Array.Empty<string>(),
+            Array.Empty<TopLevelInventory>(),
             Array.Empty<DirectoryRisk>(),
             Array.Empty<SyncBlocker>());
 
@@ -84,6 +87,7 @@ public sealed class RiskEngineTests
             1,
             false,
             Array.Empty<string>(),
+            Array.Empty<TopLevelInventory>(),
             Array.Empty<DirectoryRisk>(),
             new[] { new SyncBlocker("C:\\Users\\test\\OneDrive\\bad:name.txt", "invalid-character", "test", Severity.HighRisk) });
 
@@ -105,6 +109,7 @@ public sealed class RiskEngineTests
             1,
             false,
             Array.Empty<string>(),
+            Array.Empty<TopLevelInventory>(),
             Array.Empty<DirectoryRisk>(),
             Array.Empty<SyncBlocker>());
 

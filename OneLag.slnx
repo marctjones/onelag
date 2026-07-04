@@ -5,6 +5,7 @@
     <Project Path="src/OneLag.Windows/OneLag.Windows.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/OneLag.Cli.Tests/OneLag.Cli.Tests.csproj" />
     <Project Path="tests/OneLag.Core.Tests/OneLag.Core.Tests.csproj" />
   </Folder>
 </Solution>

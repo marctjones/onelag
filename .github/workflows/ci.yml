@@ -1,0 +1,73 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: test-${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-latest
+          - windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore OneLag.slnx
+
+      - name: Format
+        run: dotnet format OneLag.slnx --verify-no-changes --no-restore
+
+      - name: Build
+        run: dotnet build OneLag.slnx --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test OneLag.slnx --configuration Release --no-build
+
+      - name: Publish Windows x64 compile check
+        run: >
+          dotnet publish src/OneLag.Cli/OneLag.Cli.csproj
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:Version=0.1.0-ci.${{ github.run_number }}
+          --output artifacts/publish/win-x64
+
+      - name: Smoke published Windows executable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $exe = Join-Path $PWD "artifacts/publish/win-x64/onelag.exe"
+          & $exe version
+          $root = Join-Path $env:RUNNER_TEMP "OneLagSmokeRoot"
+          $report = Join-Path $env:RUNNER_TEMP "onelag-ci-report.md"
+          New-Item -ItemType Directory -Force -Path (Join-Path $root "Documents") | Out-Null
+          "content" | Set-Content (Join-Path $root "Documents/file.txt")
+          & $exe scan --root $root --output $report --max-items 1000
+          if ($LASTEXITCODE -ne 0) {
+            throw "scan smoke failed with exit code $LASTEXITCODE"
+          }
+          if (!(Test-Path $report)) {
+            throw "scan smoke did not create report"
+          }
+          & $exe repair reset-onedrive
+          if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 1) {
+            throw "repair dry-run returned unexpected exit code $LASTEXITCODE"
+          }

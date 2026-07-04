@@ -63,6 +63,18 @@ Execute the first supported reset command candidate only after reviewing the dry
 onelag repair reset-onedrive --execute --i-understand-reset-disconnects-sync
 ```
 
+## Local Validation
+
+Run the macOS-friendly validation suite from the repository root:
+
+```bash
+scripts/test-local.sh
+```
+
+That command restores packages, verifies formatting, builds Release, runs core and CLI process tests, and cross-publishes a Windows x64 self-contained executable to `tmp/local-validation/publish/win-x64/onelag.exe`.
+
+GitHub CI runs the same Release build and tests on macOS and Windows. Windows CI also runs the published `onelag.exe` for `version`, `scan`, and `repair reset-onedrive` smoke coverage.
+
 ## What We Are Working On
 
 We are building a tool that answers these questions on a Windows machine:
@@ -110,6 +122,7 @@ Implemented in the current preview:
 - Fuller OneDrive known-issue detection for invalid characters, leading/trailing spaces, blocked names, reserved device names, root `forms`, path-length limits, duplicate names, network/reparse sync roots, temporary files, PST/OST files, OneNote notebook files, preview-size limits, and large files.
 - OneDrive client-cache health metadata checks that avoid undocumented database parsing, report log/settings/DAT metadata, and offer a Microsoft-supported reset dry run.
 - `onelag watch` bounded foreground recorder with start, stop, status, mark, and report commands.
+- Cross-platform test framework with core unit tests, CLI process tests, local macOS validation, Windows CI, and release-time Windows executable smoke tests.
 - Windows x64 self-contained publish and PowerShell installer bundle.
 - GitHub Actions release workflow for test, publish, package, and release artifacts.
 

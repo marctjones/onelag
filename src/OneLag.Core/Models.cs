@@ -77,8 +77,20 @@ public sealed record InventorySummary(
     int MaxDepth,
     bool WasCapped,
     IReadOnlyList<string> InaccessiblePaths,
+    IReadOnlyList<TopLevelInventory> TopLevelItems,
     IReadOnlyList<DirectoryRisk> HighRiskDirectories,
     IReadOnlyList<SyncBlocker> SyncBlockers)
+{
+    [JsonIgnore]
+    public long TotalItems => FileCount + DirectoryCount;
+}
+
+public sealed record TopLevelInventory(
+    string Path,
+    string Name,
+    long FileCount,
+    long DirectoryCount,
+    long TotalBytes)
 {
     [JsonIgnore]
     public long TotalItems => FileCount + DirectoryCount;
