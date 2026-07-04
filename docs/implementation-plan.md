@@ -137,6 +137,7 @@ Tasks:
 
 - Add signed or checksumed release artifacts.
 - Add GitHub Actions for build, test, and release.
+- Add coverage collection and ratchet gates. Status: implemented with `scripts/test-coverage.sh` and CI artifacts.
 - Add sample reports.
 - Add privacy and safety documentation.
 - Tag `v0.1.0`.

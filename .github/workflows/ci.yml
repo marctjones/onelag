@@ -40,6 +40,19 @@ jobs:
       - name: Test
         run: dotnet test OneLag.slnx --configuration Release --no-build
 
+      - name: Coverage
+        if: runner.os == 'macOS'
+        run: scripts/test-coverage.sh
+
+      - name: Upload coverage artifact
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-cobertura
+          path: |
+            tmp/coverage/**/*.xml
+            tmp/coverage/coverage-summary.txt
+
       - name: Publish Windows x64 compile check
         run: >
           dotnet publish src/OneLag.Cli/OneLag.Cli.csproj

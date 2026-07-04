@@ -2,7 +2,7 @@
 
 Live tracker: [GitHub milestones](https://github.com/marctjones/onelag/milestones) and implementation issues [#1](https://github.com/marctjones/onelag/issues/1) through [#60](https://github.com/marctjones/onelag/issues/60). Treat GitHub milestones and issues as the implementation source of truth; keep this file synchronized when tracker scope changes.
 
-Current release status: the latest installable preview implements the core .NET solution, `scan`, fuller OneDrive known-issue detection, OneDrive client-cache health metadata, Windows system-pressure sampling with PDH/process/memory/power signals when available, recent Event Viewer summary correlation when available, WPR/WPA and ProcMon escalation-plan generation, dry-run remediation move-plan generation, supported reset dry-run/explicit execution, bounded foreground `watch` with episode detection, UI-neutral report viewing, local macOS validation, Windows CI smoke validation, release packaging, and a Windows x64 PowerShell installer bundle. It does not complete every roadmap issue; native tray/GUI, a signed MSI/EXE installer, deeper WPR/WPA and ProcMon trace execution/validation, broader remediation execution, and broad Windows 11 integration coverage remain open.
+Current release status: the latest installable preview implements the core .NET solution, `scan`, fuller OneDrive known-issue detection, OneDrive client-cache health metadata, Windows system-pressure sampling with PDH/process/memory/power signals when available, recent Event Viewer summary correlation when available, WPR/WPA and ProcMon escalation-plan generation, dry-run remediation move-plan generation, supported reset dry-run/explicit execution, bounded foreground `watch` with episode detection, UI-neutral report viewing, local macOS validation, coverage collection, Windows CI smoke validation, release packaging, and a Windows x64 PowerShell installer bundle. It does not complete every roadmap issue; native tray/GUI, a signed MSI/EXE installer, deeper WPR/WPA and ProcMon trace execution/validation, broader remediation execution, and broad Windows 11 integration coverage remain open.
 
 ## v0.1 - Documentation And Scanner Foundation
 
@@ -66,6 +66,7 @@ Tracker: [v0.6 milestone](https://github.com/marctjones/onelag/milestone/6), iss
 
 - Add GitHub Actions build and test.
 - Add packaged Windows artifacts.
+- Add coverage collection and ratchet gates.
 - Add sample reports.
 - Add privacy and support-bundle docs.
 - Publish `v0.1.0` once the scanner is useful and safe.

@@ -91,7 +91,15 @@ scripts/test-local.sh
 
 That command restores packages, verifies formatting, builds Release, runs core and CLI process tests, and cross-publishes a Windows x64 self-contained executable to `tmp/local-validation/publish/win-x64/onelag.exe`.
 
-GitHub CI runs the same Release build and tests on macOS and Windows. Windows CI also runs the published `onelag.exe` for `version`, `scan`, and `repair reset-onedrive` smoke coverage.
+Run the coverage gate:
+
+```bash
+scripts/test-coverage.sh
+```
+
+That command collects Cobertura coverage, merges duplicate source lines across test projects, and enforces the current ratchet gates. Override with `ONELAG_COVERAGE_MIN` and `ONELAG_CORE_COVERAGE_MIN` only when deliberately tightening the gate.
+
+GitHub CI runs the same Release build and tests on macOS and Windows. macOS CI uploads coverage artifacts, and Windows CI runs the published `onelag.exe` for `version`, `scan`, and `repair reset-onedrive` smoke coverage.
 
 ## What We Are Working On
 
@@ -146,6 +154,7 @@ Implemented in the current preview:
 - `onelag watch` bounded foreground recorder with start, stop, status, mark, and report commands.
 - Watch report episode detection that groups timer-drift samples and manual lag markers into inferred categories.
 - UI-neutral report-view service plus `onelag view` for saved diagnostic and watch report summaries.
+- Coverage collection, merged coverage summary, and CI artifact upload with initial ratchet gates.
 - Cross-platform test framework with core unit tests, Windows-layer parser tests, CLI process tests, local macOS validation, Windows CI, and release-time Windows executable smoke tests.
 - Windows x64 self-contained publish and PowerShell installer bundle.
 - GitHub Actions release workflow for test, publish, package, and release artifacts.
@@ -156,4 +165,4 @@ Still roadmap work:
 - Signed MSI/EXE installer.
 - Deeper Windows-only validation for Files On-Demand states, WPR/WPA, and ProcMon escalation runbooks.
 - Automated remediation plan execution with confirmation and rollback notes.
-- Coverage reporting and broader integration tests on real Windows 11 systems.
+- Broader integration tests on real Windows 11 systems.
