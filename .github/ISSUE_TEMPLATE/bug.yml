@@ -1,0 +1,38 @@
+name: Bug
+description: Report incorrect or unsafe OneLag behavior
+title: "[Bug]: "
+labels: ["type:bug"]
+body:
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed Behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction Steps
+      description: Redact private paths and OneDrive account data unless needed.
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Safety Or Privacy Impact
+      description: Did this mutate files, expose paths, hang the machine, or give unsafe advice?
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Fix Validation
+      description: Tests, coverage, CI, and manual Windows checks needed.
+    validations:
+      required: true

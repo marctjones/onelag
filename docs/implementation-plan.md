@@ -10,7 +10,10 @@ Deliverables:
 - Research-backed problem statement.
 - Architecture document.
 - Roadmap.
+- Agent instructions and development best-practice documentation.
+- GitHub issue and pull request templates.
 - Initial public GitHub repository.
+- Live GitHub milestones and issues for the implementation roadmap.
 
 Exit criteria:
 
@@ -142,3 +145,7 @@ Acceptance:
 - Whether high-risk development directories should be counted fully or summarized with capped estimates by default.
 - Whether OneDrive log churn can be used reliably without relying on undocumented log formats.
 - Whether an optional ETW/WPR support bundle is worth adding before the GUI.
+
+## Tracker Source Of Truth
+
+GitHub milestones and issues are the implementation tracker. Keep this document and `ROADMAP.md` aligned with the live tracker when scope changes.

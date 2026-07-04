@@ -1,0 +1,37 @@
+name: Feature
+description: Plan a new OneLag capability
+title: "[Feature]: "
+labels: ["type:feature"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user or system problem does this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: approach
+    attributes:
+      label: Proposed Approach
+      description: Include architecture boundaries, safety constraints, and Windows-specific considerations.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      description: Use checkboxes for concrete, testable outcomes.
+      value: |
+        - [ ] 
+        - [ ] Tests added or updated
+        - [ ] Docs updated if user-visible behavior changes
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation Plan
+      description: Unit, integration, coverage, CI, and manual Windows validation expected.
+    validations:
+      required: true

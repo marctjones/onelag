@@ -1,6 +1,10 @@
 # Roadmap
 
+Live tracker: [GitHub milestones](https://github.com/marctjones/onelag/milestones) and implementation issues [#1](https://github.com/marctjones/onelag/issues/1) through [#32](https://github.com/marctjones/onelag/issues/32). Treat GitHub milestones and issues as the implementation source of truth; keep this file synchronized when tracker scope changes.
+
 ## v0.1 - Documentation And Scanner Foundation
+
+Tracker: [v0.1 milestone](https://github.com/marctjones/onelag/milestone/1), issues [#1](https://github.com/marctjones/onelag/issues/1)-[#6](https://github.com/marctjones/onelag/issues/6).
 
 - Publish the source PDF and design docs.
 - Create .NET CLI skeleton.
@@ -10,6 +14,8 @@
 
 ## v0.2 - Safe OneDrive Inventory
 
+Tracker: [v0.2 milestone](https://github.com/marctjones/onelag/milestone/2), issues [#7](https://github.com/marctjones/onelag/issues/7)-[#11](https://github.com/marctjones/onelag/issues/11).
+
 - Discover personal and work/school OneDrive roots.
 - Add streaming file and directory inventory.
 - Detect high-risk development directories.
@@ -17,6 +23,8 @@
 - Add report redaction.
 
 ## v0.3 - Telemetry Correlation
+
+Tracker: [v0.3 milestone](https://github.com/marctjones/onelag/milestone/3), issues [#12](https://github.com/marctjones/onelag/issues/12)-[#16](https://github.com/marctjones/onelag/issues/16).
 
 - Sample OneDrive CPU and memory.
 - Sample disk queue counters where available.
@@ -26,6 +34,8 @@
 
 ## v0.4 - Recommendation Engine
 
+Tracker: [v0.4 milestone](https://github.com/marctjones/onelag/milestone/4), issues [#17](https://github.com/marctjones/onelag/issues/17)-[#21](https://github.com/marctjones/onelag/issues/21).
+
 - Add configurable threshold policy.
 - Add default `300,000` item guidance.
 - Add documented public-preview `1,000,000` item profile checks.
@@ -34,6 +44,8 @@
 
 ## v0.5 - Remediation Planning
 
+Tracker: [v0.5 milestone](https://github.com/marctjones/onelag/milestone/5), issues [#22](https://github.com/marctjones/onelag/issues/22)-[#26](https://github.com/marctjones/onelag/issues/26).
+
 - Generate dry-run PowerShell move plans.
 - Add destination free-space checks.
 - Add explicit confirmation flow for executing generated moves.
@@ -41,6 +53,8 @@
 - Keep OneDrive reset and process kill as manual emergency actions.
 
 ## v0.6 - Release Hardening
+
+Tracker: [v0.6 milestone](https://github.com/marctjones/onelag/milestone/6), issues [#27](https://github.com/marctjones/onelag/issues/27)-[#32](https://github.com/marctjones/onelag/issues/32).
 
 - Add GitHub Actions build and test.
 - Add packaged Windows artifacts.

@@ -31,8 +31,10 @@ The first implementation target is a .NET Windows console application because th
 - [Research validation](docs/research-validation.md)
 - [Architecture](docs/architecture.md)
 - [Implementation plan](docs/implementation-plan.md)
+- [Development best practices](docs/development-best-practices.md)
 - [Roadmap](ROADMAP.md)
+- [Agent instructions](AGENTS.md)
 
 ## Current Status
 
-The repository currently contains the source PDF and design documentation. Implementation has not started yet.
+The repository currently contains the source PDF, design documentation, development guardrails, and GitHub planning templates. Implementation has not started yet.
