@@ -173,10 +173,10 @@ Goal: add user-friendly interfaces without duplicating diagnostic logic.
 
 Tasks:
 
-- Define UI-neutral application service contracts.
-- Add a guided interactive console flow.
-- Record a TUI-versus-guided-console decision.
-- Generate a local report and episode timeline viewer.
+- Define UI-neutral application service contracts. Status: started with `IReportViewService` for report summaries and timeline items.
+- Add a guided interactive console flow. Status: implemented for the current CLI workflows.
+- Record a TUI-versus-guided-console decision. Status: documented in `docs/interface-strategy.md`.
+- Generate a local report and episode timeline viewer. Status: implemented with `onelag view --report PATH [--timeline]`.
 - Add an optional tray controller for watch mode.
 - Choose and scaffold a native Windows GUI framework.
 - Build scan/watch dashboard, lag-marker UX, privacy/export controls, and accessibility validation.

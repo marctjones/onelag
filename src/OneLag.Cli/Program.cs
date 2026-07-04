@@ -47,6 +47,7 @@ internal static class Program
                 "repair" => RunRepair(args[1..]),
                 "support" => RunSupport(args[1..]),
                 "remediate" => RunRemediate(args[1..], cancellation.Token),
+                "view" => RunView(args[1..]),
                 "interactive" => await RunInteractive(cancellation.Token),
                 "version" => RunVersion(),
                 _ => UnknownCommand(args[0])
@@ -264,6 +265,47 @@ internal static class Program
         Console.WriteLine($"Bytes: {summary.TotalBytes:N0}");
         Console.WriteLine($"Destination has enough space: {summary.DestinationHasEnoughSpace?.ToString() ?? "unknown"}");
         return 0;
+    }
+
+    private static int RunView(string[] args)
+    {
+        string? reportPath = null;
+        var showFullTimeline = false;
+
+        for (var i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--report":
+                case "-r":
+                    reportPath = RequireValue(args, ref i, args[i]);
+                    break;
+                case "--timeline":
+                    showFullTimeline = true;
+                    break;
+                default:
+                    if (reportPath is null && !args[i].StartsWith("-", StringComparison.Ordinal))
+                    {
+                        reportPath = args[i];
+                    }
+                    else
+                    {
+                        throw new ArgumentException($"Unknown view argument '{args[i]}'.");
+                    }
+
+                    break;
+            }
+        }
+
+        if (reportPath is null)
+        {
+            throw new ArgumentException("view requires --report PATH or a report path argument.");
+        }
+
+        var service = new LocalReportViewService();
+        var summary = service.Summarize(reportPath);
+        PrintLocalReportSummary(summary, showFullTimeline);
+        return summary.Kind == LocalReportKind.Unknown ? 1 : 0;
     }
 
     private static int RunResetOneDrive(string[] args)
@@ -524,24 +566,52 @@ internal static class Program
 
     private static async Task<int> RunInteractive(CancellationToken cancellationToken)
     {
-        Console.WriteLine("OneLag");
-        Console.WriteLine("1. Run scan");
-        Console.WriteLine("2. Start watch mode");
-        Console.WriteLine("3. Mark lag now");
-        Console.WriteLine("4. Review OneDrive reset plan");
-        Console.WriteLine("5. Generate WPR/ProcMon trace escalation plan");
-        Console.Write("Choice: ");
-        var choice = Console.ReadLine();
-
-        return choice switch
+        while (!cancellationToken.IsCancellationRequested)
         {
-            "1" => RunScan(Array.Empty<string>(), cancellationToken),
-            "2" => await WatchStart(Array.Empty<string>(), cancellationToken),
-            "3" => WatchMark(Array.Empty<string>()),
-            "4" => RunResetOneDrive(Array.Empty<string>()),
-            "5" => RunTracePlan(Array.Empty<string>()),
-            _ => 1
-        };
+            Console.WriteLine("OneLag");
+            Console.WriteLine("1. Run scan");
+            Console.WriteLine("2. Start watch mode");
+            Console.WriteLine("3. Mark lag now");
+            Console.WriteLine("4. Review OneDrive reset plan");
+            Console.WriteLine("5. Generate WPR/ProcMon trace escalation plan");
+            Console.WriteLine("6. View saved report");
+            Console.WriteLine("Q. Quit");
+            Console.Write("Choice: ");
+            var choice = Console.ReadLine();
+
+            switch (choice?.Trim().ToLowerInvariant())
+            {
+                case "1":
+                    return RunScan(Array.Empty<string>(), cancellationToken);
+                case "2":
+                    return await WatchStart(Array.Empty<string>(), cancellationToken);
+                case "3":
+                    return WatchMark(Array.Empty<string>());
+                case "4":
+                    return RunResetOneDrive(Array.Empty<string>());
+                case "5":
+                    return RunTracePlan(Array.Empty<string>());
+                case "6":
+                    Console.Write("Report path: ");
+                    var reportPath = Console.ReadLine();
+                    if (string.IsNullOrWhiteSpace(reportPath))
+                    {
+                        return 1;
+                    }
+
+                    return RunView(new[] { "--report", reportPath, "--timeline" });
+                case "q":
+                case "quit":
+                case "exit":
+                    return 0;
+                default:
+                    Console.WriteLine("Unknown choice.");
+                    Console.WriteLine();
+                    break;
+            }
+        }
+
+        throw new OperationCanceledException(cancellationToken);
     }
 
     private static int RunVersion()
@@ -674,6 +744,51 @@ internal static class Program
         File.WriteAllText(path, JsonSerializer.Serialize(payload, JsonOptions));
     }
 
+    private static void PrintLocalReportSummary(LocalReportSummary summary, bool showFullTimeline)
+    {
+        Console.WriteLine("OneLag Report View");
+        Console.WriteLine($"Report: {summary.SourcePath}");
+        Console.WriteLine($"Kind: {summary.Kind}");
+        Console.WriteLine($"Title: {summary.Title}");
+
+        if (summary.KeyFacts.Count > 0)
+        {
+            Console.WriteLine();
+            Console.WriteLine("Key facts:");
+            foreach (var fact in summary.KeyFacts)
+            {
+                Console.WriteLine($"- {fact}");
+            }
+        }
+
+        if (summary.Timeline.Count > 0)
+        {
+            Console.WriteLine();
+            Console.WriteLine("Timeline:");
+            var timeline = showFullTimeline ? summary.Timeline : summary.Timeline.Take(8);
+            foreach (var item in timeline)
+            {
+                var timestamp = item.Timestamp?.ToString("O", CultureInfo.InvariantCulture) ?? "not timestamped";
+                Console.WriteLine($"- {timestamp} [{item.Kind}] {item.Summary}: {item.Evidence}");
+            }
+
+            if (!showFullTimeline && summary.Timeline.Count > 8)
+            {
+                Console.WriteLine($"- {summary.Timeline.Count - 8:N0} more timeline item(s); pass --timeline to show all.");
+            }
+        }
+
+        if (summary.NextActions.Count > 0)
+        {
+            Console.WriteLine();
+            Console.WriteLine("Next actions:");
+            foreach (var action in summary.NextActions)
+            {
+                Console.WriteLine($"- {action}");
+            }
+        }
+    }
+
     private static string BuildWatchReport(IReadOnlyList<WatchSample> samples, IReadOnlyList<WatchMarker> markers)
     {
         var lines = new List<string>
@@ -757,6 +872,7 @@ internal static class Program
           repair reset-onedrive [--execute --i-understand-reset-disconnects-sync]
           support trace-plan [--output DIR]
           remediate move-plan --source PATH --destination PATH [--output DIR]
+          view --report PATH [--timeline]
           interactive
           version
         """);

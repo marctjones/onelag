@@ -37,6 +37,12 @@ public sealed class CliSmokeTests : IDisposable
         Assert.Contains("Top-level item", report);
         Assert.Contains("<root:1>", report);
         Assert.DoesNotContain(scanRoot, report);
+
+        var view = await RunCli("view", "--report", reportPath);
+
+        Assert.Equal(0, view.ExitCode);
+        Assert.Contains("OneLag Report View", view.StandardOutput);
+        Assert.Contains("Kind: Diagnostic", view.StandardOutput);
     }
 
     [Fact]
@@ -76,6 +82,12 @@ public sealed class CliSmokeTests : IDisposable
         var contents = await File.ReadAllTextAsync(reportPath);
         Assert.Contains("OneLag Watch Report", contents);
         Assert.Contains("## Episodes", contents);
+
+        var view = await RunCli("view", "--report", reportPath, "--timeline");
+
+        Assert.Equal(0, view.ExitCode);
+        Assert.Contains("Kind: Watch", view.StandardOutput);
+        Assert.Contains("lag-marker", view.StandardOutput);
     }
 
     [Fact]

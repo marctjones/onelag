@@ -69,6 +69,12 @@ Generate WPR/WPA and ProcMon escalation runbooks for unresolved responsiveness p
 onelag support trace-plan --output onelag-trace-plan
 ```
 
+Summarize a saved diagnostic or watch report locally:
+
+```powershell
+onelag view --report onelag-watch-report.md --timeline
+```
+
 Generate a dry-run move plan for a risky synced folder:
 
 ```powershell
@@ -139,6 +145,7 @@ Implemented in the current preview:
 - Dry-run remediation move-plan generation with explicit execution flags, rollback script, verification script, and destination-space evidence.
 - `onelag watch` bounded foreground recorder with start, stop, status, mark, and report commands.
 - Watch report episode detection that groups timer-drift samples and manual lag markers into inferred categories.
+- UI-neutral report-view service plus `onelag view` for saved diagnostic and watch report summaries.
 - Cross-platform test framework with core unit tests, Windows-layer parser tests, CLI process tests, local macOS validation, Windows CI, and release-time Windows executable smoke tests.
 - Windows x64 self-contained publish and PowerShell installer bundle.
 - GitHub Actions release workflow for test, publish, package, and release artifacts.
