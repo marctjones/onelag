@@ -69,6 +69,12 @@ Generate WPR/WPA and ProcMon escalation runbooks for unresolved responsiveness p
 onelag support trace-plan --output onelag-trace-plan
 ```
 
+Generate a dry-run move plan for a risky synced folder:
+
+```powershell
+onelag remediate move-plan --source "$env:USERPROFILE\OneDrive\project" --destination "C:\LocalDev\project" --output onelag-move-plan
+```
+
 ## Local Validation
 
 Run the macOS-friendly validation suite from the repository root:
@@ -130,6 +136,7 @@ Implemented in the current preview:
 - Windows system-pressure sampling for OneDrive CPU, top-process CPU, memory availability/commit pressure, disk queue/active-time counters, paging-file usage, system-drive free space, and power source when available.
 - Recent Windows Event Viewer summary correlation for critical, error, and warning events when Windows can provide it.
 - WPR/WPA and ProcMon escalation-plan generation for inconclusive responsiveness pressure, without automatically starting heavy tracing.
+- Dry-run remediation move-plan generation with explicit execution flags, rollback script, verification script, and destination-space evidence.
 - `onelag watch` bounded foreground recorder with start, stop, status, mark, and report commands.
 - Cross-platform test framework with core unit tests, Windows-layer parser tests, CLI process tests, local macOS validation, Windows CI, and release-time Windows executable smoke tests.
 - Windows x64 self-contained publish and PowerShell installer bundle.

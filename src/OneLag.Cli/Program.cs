@@ -46,6 +46,7 @@ internal static class Program
                 "watch" => await RunWatch(args[1..], cancellation.Token),
                 "repair" => RunRepair(args[1..]),
                 "support" => RunSupport(args[1..]),
+                "remediate" => RunRemediate(args[1..], cancellation.Token),
                 "interactive" => await RunInteractive(cancellation.Token),
                 "version" => RunVersion(),
                 _ => UnknownCommand(args[0])
@@ -199,6 +200,69 @@ internal static class Program
             Console.WriteLine($"- {file}");
         }
 
+        return 0;
+    }
+
+    private static int RunRemediate(string[] args, CancellationToken cancellationToken)
+    {
+        if (args.Length == 0 || args[0] is "-h" or "--help" or "help")
+        {
+            PrintRemediateHelp();
+            return 0;
+        }
+
+        return args[0].ToLowerInvariant() switch
+        {
+            "move-plan" => RunMovePlan(args[1..], cancellationToken),
+            _ => UnknownCommand($"remediate {args[0]}")
+        };
+    }
+
+    private static int RunMovePlan(string[] args, CancellationToken cancellationToken)
+    {
+        string? source = null;
+        string? destination = null;
+        var output = "onelag-move-plan";
+        var maxItems = 100_000;
+
+        for (var i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--source":
+                    source = RequireValue(args, ref i, "--source");
+                    break;
+                case "--destination":
+                    destination = RequireValue(args, ref i, "--destination");
+                    break;
+                case "--output":
+                case "-o":
+                    output = RequireValue(args, ref i, args[i]);
+                    break;
+                case "--max-items":
+                    maxItems = int.Parse(RequireValue(args, ref i, "--max-items"), CultureInfo.InvariantCulture);
+                    break;
+                default:
+                    throw new ArgumentException($"Unknown remediate move-plan argument '{args[i]}'.");
+            }
+        }
+
+        if (source is null)
+        {
+            throw new ArgumentException("--source is required.");
+        }
+
+        if (destination is null)
+        {
+            throw new ArgumentException("--destination is required.");
+        }
+
+        var summary = MovePlanWriter.Write(new MovePlanOptions(source, destination, output, maxItems), cancellationToken);
+        Console.WriteLine($"Move plan: {Path.GetFullPath(output)}");
+        Console.WriteLine($"Files: {summary.FileCount:N0}");
+        Console.WriteLine($"Directories: {summary.DirectoryCount:N0}");
+        Console.WriteLine($"Bytes: {summary.TotalBytes:N0}");
+        Console.WriteLine($"Destination has enough space: {summary.DestinationHasEnoughSpace?.ToString() ?? "unknown"}");
         return 0;
     }
 
@@ -676,6 +740,7 @@ internal static class Program
           watch report [--output DIR] [--report PATH]
           repair reset-onedrive [--execute --i-understand-reset-disconnects-sync]
           support trace-plan [--output DIR]
+          remediate move-plan --source PATH --destination PATH [--output DIR]
           interactive
           version
         """);
@@ -718,6 +783,19 @@ internal static class Program
 
         Safety:
           The generated plan does not start tracing. Review the files, then run the WPR scripts manually on Windows.
+        """);
+    }
+
+    private static void PrintRemediateHelp()
+    {
+        Console.WriteLine("""
+        OneLag remediate
+
+        Commands:
+          move-plan   Generate a dry-run move plan, execution script, rollback script, and verification script.
+
+        Safety:
+          Generated scripts do not move files unless run with -Execute -IUnderstandMovesFiles.
         """);
     }
 }

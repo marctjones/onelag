@@ -105,6 +105,36 @@ public sealed class CliSmokeTests : IDisposable
         Assert.Contains("Drop Filtered Events", await File.ReadAllTextAsync(Path.Combine(output, "ProcMon-OneLag-Filters.md")));
     }
 
+    [Fact]
+    public async Task RemediateMovePlanWritesDryRunScripts()
+    {
+        var source = Path.Combine(tempRoot, "OneDrive", "project");
+        var destination = Path.Combine(tempRoot, "LocalDev", "project");
+        var output = Path.Combine(tempRoot, "move-plan");
+        Directory.CreateDirectory(source);
+        File.WriteAllText(Path.Combine(source, "file.txt"), "content");
+
+        var result = await RunCli(
+            "remediate",
+            "move-plan",
+            "--source",
+            source,
+            "--destination",
+            destination,
+            "--output",
+            output);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.True(File.Exists(Path.Combine(output, "move-plan.md")));
+        Assert.True(File.Exists(Path.Combine(output, "move-plan.json")));
+        Assert.True(File.Exists(Path.Combine(output, "Move-OneLagItems.ps1")));
+        Assert.True(File.Exists(Path.Combine(output, "Rollback-OneLagMove.ps1")));
+        Assert.True(File.Exists(Path.Combine(output, "Verify-OneLagMove.ps1")));
+        Assert.Contains("Move plan:", result.StandardOutput);
+        Assert.Contains("-Execute -IUnderstandMovesFiles", await File.ReadAllTextAsync(Path.Combine(output, "Move-OneLagItems.ps1")));
+        Assert.Contains("Rollback", await File.ReadAllTextAsync(Path.Combine(output, "move-plan.md")));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(tempRoot))
