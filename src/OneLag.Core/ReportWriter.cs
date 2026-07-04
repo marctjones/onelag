@@ -27,6 +27,7 @@ public static class ReportWriter
         builder.AppendLine($"- Diagnosis: `{report.Diagnosis}`");
         builder.AppendLine($"- Telemetry: `{report.Telemetry.EvidenceState}`");
         builder.AppendLine($"- System pressure: `{report.SystemPressure.EvidenceState}`");
+        builder.AppendLine($"- OneDrive client health: `{report.OneDriveClientHealth.EvidenceState}`");
         builder.AppendLine();
 
         builder.AppendLine("## Roots");
@@ -69,6 +70,20 @@ public static class ReportWriter
             builder.AppendLine();
         }
 
+        builder.AppendLine("## OneDrive Client Health");
+        builder.AppendLine($"- Internal sync database parsed: `{report.OneDriveClientHealth.InternalSyncDatabaseParsed}`");
+        builder.AppendLine($"- Reset command candidates: `{report.OneDriveClientHealth.ResetCommands.Count:N0}`");
+        foreach (var signal in report.OneDriveClientHealth.Signals)
+        {
+            builder.AppendLine($"- **{signal.Severity}** `{signal.Kind}`: {signal.Evidence} Safety: {signal.Safety}");
+        }
+
+        foreach (var command in report.OneDriveClientHealth.ResetCommands)
+        {
+            builder.AppendLine($"- Reset candidate `{command.Source}`: `{redactor.PathValue(command.ExecutablePath)} {command.Arguments}`");
+        }
+
+        builder.AppendLine();
         builder.AppendLine("## Findings");
         foreach (var finding in report.Findings)
         {

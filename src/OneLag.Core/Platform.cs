@@ -8,6 +8,8 @@ public interface IPlatformProbe
 
     SystemPressureSnapshot CaptureSystemPressure();
 
+    OneDriveClientHealthSnapshot CaptureOneDriveClientHealth(IReadOnlyList<RootCandidate> roots, TelemetrySnapshot telemetry);
+
     IReadOnlyList<EventLogSummary> ReadRecentEventSummaries(DateTimeOffset since);
 
     string? GetForegroundProcessName();
@@ -49,6 +51,25 @@ public class PortablePlatformProbe : IPlatformProbe
             "unknown",
             Array.Empty<string>(),
             "portable-fallback");
+    }
+
+    public virtual OneDriveClientHealthSnapshot CaptureOneDriveClientHealth(IReadOnlyList<RootCandidate> roots, TelemetrySnapshot telemetry)
+    {
+        _ = roots;
+        _ = telemetry;
+        return new OneDriveClientHealthSnapshot(
+            DateTimeOffset.UtcNow,
+            false,
+            "portable-fallback-undocumented-database-not-parsed",
+            new[]
+            {
+                new ClientHealthSignal(
+                    Severity.Info,
+                    "internal-sync-database-not-parsed",
+                    "OneDrive internal sync databases are undocumented and are not parsed by OneLag.",
+                    "Use Microsoft-supported reset or repair paths instead of editing OneDrive cache files.")
+            },
+            Array.Empty<OneDriveResetCommand>());
     }
 
     public virtual IReadOnlyList<EventLogSummary> ReadRecentEventSummaries(DateTimeOffset since)

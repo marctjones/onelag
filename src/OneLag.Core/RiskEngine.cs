@@ -5,7 +5,8 @@ public sealed class RiskEngine
     public (DifferentialDiagnosis Diagnosis, IReadOnlyList<Finding> Findings, IReadOnlyList<Recommendation> Recommendations) Analyze(
         IReadOnlyList<InventorySummary> inventories,
         TelemetrySnapshot telemetry,
-        SystemPressureSnapshot pressure)
+        SystemPressureSnapshot pressure,
+        OneDriveClientHealthSnapshot clientHealth)
     {
         var findings = new List<Finding>();
         var recommendations = new List<Recommendation>();
@@ -21,6 +22,8 @@ public sealed class RiskEngine
         var capped = inventories.Any(inventory => inventory.WasCapped);
         var onedriveRunning = telemetry.OneDriveProcesses.Count > 0;
         var logChurn = telemetry.OneDriveLogFilesChangedLastMinute;
+        var resetWorthConsidering = clientHealth.ResetCommands.Count > 0
+            && clientHealth.Signals.Any(signal => signal.Severity is Severity.Warning or Severity.HighRisk or Severity.Emergency);
 
         if (totalItems >= 1_000_000)
         {
@@ -92,8 +95,22 @@ public sealed class RiskEngine
                 "medium"));
         }
 
+        if (resetWorthConsidering)
+        {
+            var topSignals = string.Join(", ", clientHealth.Signals
+                .Where(signal => signal.Severity is Severity.Warning or Severity.HighRisk or Severity.Emergency)
+                .Take(5)
+                .Select(signal => signal.Kind));
+
+            findings.Add(new Finding(
+                Severity.Warning,
+                "OneDrive client cache reset is worth considering",
+                $"OneDrive client health metadata found reset-worthy signal(s): {topSignals}. OneLag did not parse or modify the internal sync database.",
+                "medium"));
+        }
+
         var hasStaticOneDriveRisk = totalItems >= 200_000 || highRiskDirectories > 0 || highRiskBlockers > 0 || capped;
-        var hasLiveOneDriveRisk = onedriveRunning && logChurn >= 5;
+        var hasLiveOneDriveRisk = (onedriveRunning && logChurn >= 5) || resetWorthConsidering;
 
         var diagnosis = (hasStaticOneDriveRisk, hasLiveOneDriveRisk) switch
         {
@@ -162,6 +179,15 @@ public sealed class RiskEngine
                     "OneDrive does not support syncing through network locations, symbolic links, or junction points.",
                     "Unlink/relink or move data only after confirming the real local path and backup state."));
             }
+        }
+
+        if (resetWorthConsidering)
+        {
+            recommendations.Add(new Recommendation(
+                RecommendationKind.ResetOneDrive,
+                "Consider a supported OneDrive reset",
+                "Microsoft documents OneDrive reset as a supported sync repair path that rebuilds the DAT cache after restart.",
+                "Run `onelag repair reset-onedrive` first to review the dry-run plan. Execute only after confirming sync status and work policy."));
         }
 
         if (diagnosis is DifferentialDiagnosis.OneDriveNotProven or DifferentialDiagnosis.NonOneDrivePressureSuspected)

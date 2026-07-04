@@ -51,6 +51,18 @@ onelag watch mark
 onelag watch report --report onelag-watch-report.md
 ```
 
+Review the supported OneDrive reset plan without changing anything:
+
+```powershell
+onelag repair reset-onedrive
+```
+
+Execute the first supported reset command candidate only after reviewing the dry run:
+
+```powershell
+onelag repair reset-onedrive --execute --i-understand-reset-disconnects-sync
+```
+
 ## What We Are Working On
 
 We are building a tool that answers these questions on a Windows machine:
@@ -96,6 +108,7 @@ Implemented in the current preview:
 - .NET solution split into core, Windows platform probe, CLI, and tests.
 - `onelag scan` with streaming inventory, high-risk directory detection, static sync-blocker detection, redacted Markdown/JSON reports, and conservative differential diagnosis.
 - Fuller OneDrive known-issue detection for invalid characters, leading/trailing spaces, blocked names, reserved device names, root `forms`, path-length limits, duplicate names, network/reparse sync roots, temporary files, PST/OST files, OneNote notebook files, preview-size limits, and large files.
+- OneDrive client-cache health metadata checks that avoid undocumented database parsing, report log/settings/DAT metadata, and offer a Microsoft-supported reset dry run.
 - `onelag watch` bounded foreground recorder with start, stop, status, mark, and report commands.
 - Windows x64 self-contained publish and PowerShell installer bundle.
 - GitHub Actions release workflow for test, publish, package, and release artifacts.

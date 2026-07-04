@@ -115,6 +115,24 @@ public sealed record EventLogSummary(
     int Count,
     DateTimeOffset? NewestTimestamp);
 
+public sealed record ClientHealthSignal(
+    Severity Severity,
+    string Kind,
+    string Evidence,
+    string Safety);
+
+public sealed record OneDriveResetCommand(
+    string ExecutablePath,
+    string Arguments,
+    string Source);
+
+public sealed record OneDriveClientHealthSnapshot(
+    DateTimeOffset Timestamp,
+    bool InternalSyncDatabaseParsed,
+    string EvidenceState,
+    IReadOnlyList<ClientHealthSignal> Signals,
+    IReadOnlyList<OneDriveResetCommand> ResetCommands);
+
 public sealed record Finding(
     Severity Severity,
     string Title,
@@ -134,6 +152,7 @@ public sealed record DiagnosticReport(
     IReadOnlyList<InventorySummary> Inventories,
     TelemetrySnapshot Telemetry,
     SystemPressureSnapshot SystemPressure,
+    OneDriveClientHealthSnapshot OneDriveClientHealth,
     IReadOnlyList<EventLogSummary> EventLogs,
     DifferentialDiagnosis Diagnosis,
     IReadOnlyList<Finding> Findings,

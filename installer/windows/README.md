@@ -28,6 +28,18 @@ Mark that lag is happening:
 onelag watch mark
 ```
 
+Review the Microsoft-supported OneDrive reset plan without changing anything:
+
+```powershell
+onelag repair reset-onedrive
+```
+
+Execute reset only after reviewing the dry run and confirming your work policy:
+
+```powershell
+onelag repair reset-onedrive --execute --i-understand-reset-disconnects-sync
+```
+
 Uninstall:
 
 ```powershell

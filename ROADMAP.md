@@ -2,7 +2,7 @@
 
 Live tracker: [GitHub milestones](https://github.com/marctjones/onelag/milestones) and implementation issues [#1](https://github.com/marctjones/onelag/issues/1) through [#60](https://github.com/marctjones/onelag/issues/60). Treat GitHub milestones and issues as the implementation source of truth; keep this file synchronized when tracker scope changes.
 
-Current release status: the latest installable preview implements the core .NET solution, `scan`, fuller OneDrive known-issue detection, bounded foreground `watch`, tests, CI packaging, and a Windows x64 PowerShell installer bundle. It does not complete every roadmap issue; native tray/GUI, a signed MSI/EXE installer, deeper Windows telemetry validation, remediation execution, and broad Windows 11 integration coverage remain open.
+Current release status: the latest installable preview implements the core .NET solution, `scan`, fuller OneDrive known-issue detection, OneDrive client-cache health metadata, supported reset dry-run/explicit execution, bounded foreground `watch`, tests, CI packaging, and a Windows x64 PowerShell installer bundle. It does not complete every roadmap issue; native tray/GUI, a signed MSI/EXE installer, deeper Windows telemetry validation, broader remediation execution, and broad Windows 11 integration coverage remain open.
 
 ## v0.1 - Documentation And Scanner Foundation
 

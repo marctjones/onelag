@@ -44,6 +44,7 @@ internal static class Program
             {
                 "scan" => RunScan(args[1..], cancellation.Token),
                 "watch" => await RunWatch(args[1..], cancellation.Token),
+                "repair" => RunRepair(args[1..]),
                 "interactive" => await RunInteractive(cancellation.Token),
                 "version" => RunVersion(),
                 _ => UnknownCommand(args[0])
@@ -54,7 +55,7 @@ internal static class Program
             Console.Error.WriteLine("Canceled.");
             return 130;
         }
-        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or PlatformNotSupportedException)
         {
             Console.Error.WriteLine($"Error: {ex.Message}");
             return 2;
@@ -141,6 +142,103 @@ internal static class Program
             "report" => WatchReport(args[1..]),
             _ => UnknownCommand($"watch {args[0]}")
         };
+    }
+
+    private static int RunRepair(string[] args)
+    {
+        if (args.Length == 0 || args[0] is "-h" or "--help" or "help")
+        {
+            PrintRepairHelp();
+            return 0;
+        }
+
+        return args[0].ToLowerInvariant() switch
+        {
+            "reset-onedrive" => RunResetOneDrive(args[1..]),
+            _ => UnknownCommand($"repair {args[0]}")
+        };
+    }
+
+    private static int RunResetOneDrive(string[] args)
+    {
+        var execute = false;
+        var acknowledged = false;
+
+        for (var i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--execute":
+                    execute = true;
+                    break;
+                case "--i-understand-reset-disconnects-sync":
+                    acknowledged = true;
+                    break;
+                default:
+                    throw new ArgumentException($"Unknown repair reset-onedrive argument '{args[i]}'.");
+            }
+        }
+
+        var platform = new WindowsPlatformProbe();
+        var roots = platform.DiscoverOneDriveRoots();
+        var telemetry = platform.CaptureTelemetry();
+        var health = platform.CaptureOneDriveClientHealth(roots, telemetry);
+
+        Console.WriteLine("OneDrive reset plan");
+        Console.WriteLine($"Internal sync database parsed: {health.InternalSyncDatabaseParsed}");
+        Console.WriteLine($"Evidence: {health.EvidenceState}");
+        Console.WriteLine();
+        foreach (var signal in health.Signals)
+        {
+            Console.WriteLine($"- {signal.Severity} {signal.Kind}: {signal.Evidence}");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("Safety:");
+        Console.WriteLine("- OneLag does not edit OneDrive cache, DAT, or database files.");
+        Console.WriteLine("- Microsoft documents reset as disconnecting sync connections and performing a full sync after restart.");
+        Console.WriteLine("- Confirm visible OneDrive status and work policy before executing on a managed laptop.");
+        Console.WriteLine();
+
+        if (health.ResetCommands.Count == 0)
+        {
+            Console.WriteLine("No supported OneDrive reset command candidate was found.");
+            return 1;
+        }
+
+        Console.WriteLine("Supported reset command candidates:");
+        foreach (var command in health.ResetCommands)
+        {
+            Console.WriteLine($"- {command.ExecutablePath} {command.Arguments} ({command.Source})");
+        }
+
+        if (!execute)
+        {
+            Console.WriteLine();
+            Console.WriteLine("Dry run only. To execute the first reset command candidate:");
+            Console.WriteLine("onelag repair reset-onedrive --execute --i-understand-reset-disconnects-sync");
+            return 0;
+        }
+
+        if (!acknowledged)
+        {
+            throw new ArgumentException("--execute requires --i-understand-reset-disconnects-sync.");
+        }
+
+        if (!OperatingSystem.IsWindows())
+        {
+            throw new PlatformNotSupportedException("Executing OneDrive reset is only supported on Windows.");
+        }
+
+        var selected = health.ResetCommands[0];
+        using var process = Process.Start(new ProcessStartInfo(selected.ExecutablePath, selected.Arguments)
+        {
+            UseShellExecute = true
+        });
+
+        Console.WriteLine($"Started: {selected.ExecutablePath} {selected.Arguments}");
+        Console.WriteLine("If OneDrive does not restart automatically, start OneDrive from the Start menu.");
+        return 0;
     }
 
     private static async Task<int> WatchStart(string[] args, CancellationToken cancellationToken)
@@ -323,6 +421,7 @@ internal static class Program
         Console.WriteLine("1. Run scan");
         Console.WriteLine("2. Start watch mode");
         Console.WriteLine("3. Mark lag now");
+        Console.WriteLine("4. Review OneDrive reset plan");
         Console.Write("Choice: ");
         var choice = Console.ReadLine();
 
@@ -331,6 +430,7 @@ internal static class Program
             "1" => RunScan(Array.Empty<string>(), cancellationToken),
             "2" => await WatchStart(Array.Empty<string>(), cancellationToken),
             "3" => WatchMark(Array.Empty<string>()),
+            "4" => RunResetOneDrive(Array.Empty<string>()),
             _ => 1
         };
     }
@@ -529,6 +629,7 @@ internal static class Program
           watch status [--output DIR]
           watch mark [--output DIR] [--note TEXT]
           watch report [--output DIR] [--report PATH]
+          repair reset-onedrive [--execute --i-understand-reset-disconnects-sync]
           interactive
           version
         """);
@@ -545,6 +646,19 @@ internal static class Program
           status  Print recorder state.
           mark    Record "lag happened now" without capturing input content.
           report  Generate a Markdown timeline report.
+        """);
+    }
+
+    private static void PrintRepairHelp()
+    {
+        Console.WriteLine("""
+        OneLag repair
+
+        Commands:
+          reset-onedrive   Show a dry-run Microsoft-supported OneDrive reset plan.
+
+        Execution:
+          reset-onedrive --execute --i-understand-reset-disconnects-sync
         """);
     }
 }

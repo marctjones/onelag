@@ -77,6 +77,10 @@ The implemented known-issue scanner maps Microsoft's OneDrive restrictions into 
 
 Source: [Restrictions and limitations in OneDrive and SharePoint](https://support.microsoft.com/en-US/onedrive/restrictions-and-limitations-in-onedrive-and-sharepoint)
 
+Microsoft documents OneDrive reset as a supported sync repair path. The reset can resolve sync issues, disconnects sync connections, causes a full sync after reset, deletes the DAT file, and rebuilds the DAT file after OneDrive restarts. Microsoft also states that resetting OneDrive does not lose files or data on the computer. This supports a dry-run reset plan and explicit opt-in execution, but not direct editing or parsing of undocumented sync databases.
+
+Source: [Reset OneDrive](https://support.microsoft.com/en-US/onedrive/reset-onedrive)
+
 Microsoft says the Support and Recovery Assistant can identify and fix several OneDrive for work or school sync issues. That is a better escalation path for account, tenant, or sync-client repair cases than custom automation in OneLag.
 
 Source: [Restrictions and limitations in OneDrive and SharePoint](https://support.microsoft.com/en-US/onedrive/restrictions-and-limitations-in-onedrive-and-sharepoint)

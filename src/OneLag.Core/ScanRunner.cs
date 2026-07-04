@@ -21,6 +21,7 @@ public sealed class ScanRunner
 
         var telemetry = platformProbe.CaptureTelemetry();
         var pressure = platformProbe.CaptureSystemPressure();
+        var clientHealth = platformProbe.CaptureOneDriveClientHealth(roots, telemetry);
         var eventLogs = platformProbe.ReadRecentEventSummaries(started.AddMinutes(-10));
 
         var inventories = new List<InventorySummary>();
@@ -30,8 +31,8 @@ public sealed class ScanRunner
             inventories.Add(inventoryScanner.Scan(root.Path, options.MaxItems, cancellationToken));
         }
 
-        var (diagnosis, findings, recommendations) = riskEngine.Analyze(inventories, telemetry, pressure);
-        return new DiagnosticReport(started, DateTimeOffset.UtcNow, roots, inventories, telemetry, pressure, eventLogs, diagnosis, findings, recommendations);
+        var (diagnosis, findings, recommendations) = riskEngine.Analyze(inventories, telemetry, pressure, clientHealth);
+        return new DiagnosticReport(started, DateTimeOffset.UtcNow, roots, inventories, telemetry, pressure, clientHealth, eventLogs, diagnosis, findings, recommendations);
     }
 
     private static IReadOnlyList<RootCandidate> ResolveRoots(IReadOnlyList<string> requestedRoots, IReadOnlyList<RootCandidate> discoveredRoots)
