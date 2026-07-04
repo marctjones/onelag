@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/OneLag.Cli/OneLag.Cli.csproj" />
+    <Project Path="src/OneLag.Core/OneLag.Core.csproj" />
+    <Project Path="src/OneLag.Windows/OneLag.Windows.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/OneLag.Core.Tests/OneLag.Core.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,90 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore OneLag.slnx
+
+      - name: Build
+        run: dotnet build OneLag.slnx --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test OneLag.slnx --configuration Release --no-build
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $version = "${{ github.ref_name }}".TrimStart("v")
+          } else {
+            $version = "0.1.0-preview.${{ github.run_number }}"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Publish Windows x64
+        shell: pwsh
+        run: |
+          dotnet publish src/OneLag.Cli/OneLag.Cli.csproj `
+            --configuration Release `
+            --runtime win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:Version=${{ steps.version.outputs.version }} `
+            --output artifacts/publish/win-x64
+
+      - name: Create installer bundle
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $bundle = "artifacts/OneLag-$version-win-x64"
+          New-Item -ItemType Directory -Force -Path $bundle | Out-Null
+          Copy-Item artifacts/publish/win-x64/* $bundle -Recurse -Force
+          Copy-Item installer/windows/Install-OneLag.ps1 $bundle
+          Copy-Item installer/windows/Uninstall-OneLag.ps1 $bundle
+          Copy-Item installer/windows/README.md $bundle
+          Compress-Archive -Path "$bundle/*" -DestinationPath "artifacts/OneLag-$version-win-x64-installer.zip" -Force
+          Get-FileHash "artifacts/OneLag-$version-win-x64-installer.zip" -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash)  OneLag-$version-win-x64-installer.zip" } |
+            Set-Content "artifacts/OneLag-$version-win-x64-installer.zip.sha256"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: onelag-win-x64-installer
+          path: |
+            artifacts/*installer.zip
+            artifacts/*installer.zip.sha256
+
+      - name: Publish GitHub release
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" `
+            artifacts/*installer.zip `
+            artifacts/*installer.zip.sha256 `
+            --repo "${{ github.repository }}" `
+            --title "OneLag ${{ github.ref_name }}" `
+            --notes "First installable OneLag preview. Includes self-contained Windows x64 CLI, one-shot scan, report generation, and bounded watch-mode recorder foundation."

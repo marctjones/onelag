@@ -1,0 +1,84 @@
+using OneLag.Core;
+
+namespace OneLag.Core.Tests;
+
+public sealed class RiskEngineTests
+{
+    [Fact]
+    public void AnalyzeClassifiesHighRiskInventoryAsOneDrivePossible()
+    {
+        var inventory = new InventorySummary(
+            "C:\\Users\\test\\OneDrive",
+            300_000,
+            1,
+            0,
+            1,
+            false,
+            Array.Empty<string>(),
+            Array.Empty<DirectoryRisk>(),
+            Array.Empty<SyncBlocker>());
+
+        var result = new RiskEngine().Analyze(
+            new[] { inventory },
+            EmptyTelemetry(),
+            EmptyPressure());
+
+        Assert.Equal(DifferentialDiagnosis.OneDrivePossible, result.Diagnosis);
+        Assert.Contains(result.Findings, finding => finding.Severity == Severity.HighRisk);
+    }
+
+    [Fact]
+    public void AnalyzeClassifiesStaticAndLiveEvidenceAsLikely()
+    {
+        var inventory = new InventorySummary(
+            "C:\\Users\\test\\OneDrive",
+            1,
+            1,
+            0,
+            1,
+            false,
+            Array.Empty<string>(),
+            new[] { new DirectoryRisk("C:\\Users\\test\\OneDrive\\repo\\.git", ".git", "test", 1) },
+            Array.Empty<SyncBlocker>());
+
+        var telemetry = new TelemetrySnapshot(
+            DateTimeOffset.UtcNow,
+            new[] { new ProcessSample("OneDrive", 123, 100, TimeSpan.FromSeconds(1), null) },
+            5,
+            null,
+            "test");
+
+        var result = new RiskEngine().Analyze(new[] { inventory }, telemetry, EmptyPressure());
+
+        Assert.Equal(DifferentialDiagnosis.OneDriveLikely, result.Diagnosis);
+    }
+
+    [Fact]
+    public void AnalyzeDoesNotBlameOneDriveWithoutEvidence()
+    {
+        var inventory = new InventorySummary(
+            "C:\\Users\\test\\OneDrive",
+            1,
+            1,
+            0,
+            1,
+            false,
+            Array.Empty<string>(),
+            Array.Empty<DirectoryRisk>(),
+            Array.Empty<SyncBlocker>());
+
+        var result = new RiskEngine().Analyze(new[] { inventory }, EmptyTelemetry(), EmptyPressure());
+
+        Assert.Equal(DifferentialDiagnosis.OneDriveNotProven, result.Diagnosis);
+    }
+
+    private static TelemetrySnapshot EmptyTelemetry()
+    {
+        return new TelemetrySnapshot(DateTimeOffset.UtcNow, Array.Empty<ProcessSample>(), 0, null, "test");
+    }
+
+    private static SystemPressureSnapshot EmptyPressure()
+    {
+        return new SystemPressureSnapshot(DateTimeOffset.UtcNow, "unknown", "unknown", "unknown", "unknown", Array.Empty<string>(), "test");
+    }
+}

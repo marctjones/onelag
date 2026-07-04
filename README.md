@@ -1,10 +1,55 @@
 # OneLag
 
-OneLag is a planned Windows diagnostic and remediation utility for OneDrive-driven system lag. The project starts from the local source document, [OneDrive_Diagnostic_and_Remediation_Guide.pdf](OneDrive_Diagnostic_and_Remediation_Guide.pdf), which describes a failure mode where OneDrive sync load, very high item counts, shell extension blocking, and risky synced development folders can make Windows Explorer and the desktop feel frozen.
+OneLag is a Windows diagnostic and remediation-planning utility for OneDrive-driven system lag. The project starts from the local source document, [OneDrive_Diagnostic_and_Remediation_Guide.pdf](OneDrive_Diagnostic_and_Remediation_Guide.pdf), which describes a failure mode where OneDrive sync load, very high item counts, shell extension blocking, and risky synced development folders can make Windows Explorer and the desktop feel frozen.
 
-The working product is a low-impact, one-shot diagnostic CLI first. It should identify local OneDrive roots, measure current OneDrive, whole-system, event-log, and disk evidence, stream-count high-risk directory clusters without loading huge file lists into memory, and produce a practical remediation plan. It should not start as a resident background service.
+The working product is a low-impact, one-shot diagnostic CLI first. It identifies local OneDrive roots, measures current OneDrive and whole-system evidence where available, stream-counts high-risk directory clusters without loading huge file lists into memory, and produces a practical report. It does not install a resident background service.
 
-After the one-shot scanner is proven, the roadmap adds an opt-in responsiveness watch mode for recurring keyboard, mouse, and UI freezes. That mode is planned as a bounded recorder with explicit start/stop controls, lag markers, privacy redaction, ring-buffer retention, and strict resource limits.
+The roadmap also includes an opt-in responsiveness watch mode for recurring keyboard, mouse, and UI freezes. The current preview has a bounded foreground recorder with explicit start/stop controls, lag markers, privacy redaction, ring-buffer retention, and strict resource limits. Tray and GUI surfaces remain roadmap work.
+
+## Install The Windows Preview
+
+Download the latest `OneLag-*-win-x64-installer.zip` from [GitHub Releases](https://github.com/marctjones/onelag/releases/latest), extract it on Windows 11, then run:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass -Force
+.\Install-OneLag.ps1
+```
+
+Open a new terminal and verify the install:
+
+```powershell
+onelag version
+onelag scan --output onelag-report.md
+```
+
+This preview is a self-contained Windows x64 CLI plus PowerShell installer bundle. It is not yet a signed MSI/EXE installer, tray app, or native GUI.
+
+## Commands
+
+Run a one-shot scan using discovered OneDrive roots:
+
+```powershell
+onelag scan --output onelag-report.md
+```
+
+Scan a specific folder and emit JSON:
+
+```powershell
+onelag scan --root "$env:USERPROFILE\OneDrive" --format json --output onelag-report.json
+```
+
+Start a bounded foreground watch session:
+
+```powershell
+onelag watch start --duration 8h
+```
+
+Mark that lag is happening, then generate a watch report:
+
+```powershell
+onelag watch mark
+onelag watch report --report onelag-watch-report.md
+```
 
 ## What We Are Working On
 
@@ -44,4 +89,20 @@ The first implementation target is a .NET Windows console application because th
 
 ## Current Status
 
-The repository currently contains the source PDF, design documentation, development guardrails, GitHub planning templates, and live milestones/issues [#1](https://github.com/marctjones/onelag/issues/1)-[#60](https://github.com/marctjones/onelag/issues/60). Implementation has not started yet.
+The repository contains the source PDF, design documentation, development guardrails, live milestones/issues [#1](https://github.com/marctjones/onelag/issues/1)-[#60](https://github.com/marctjones/onelag/issues/60), and an initial .NET implementation.
+
+Implemented in the first preview:
+
+- .NET solution split into core, Windows platform probe, CLI, and tests.
+- `onelag scan` with streaming inventory, high-risk directory detection, static sync-blocker detection, redacted Markdown/JSON reports, and conservative differential diagnosis.
+- `onelag watch` bounded foreground recorder with start, stop, status, mark, and report commands.
+- Windows x64 self-contained publish and PowerShell installer bundle.
+- GitHub Actions release workflow for test, publish, package, and release artifacts.
+
+Still roadmap work:
+
+- Native tray app and GUI.
+- Signed MSI/EXE installer.
+- Deeper Windows-only validation for performance counters, event logs, Files On-Demand states, WPR/WPA, and ProcMon escalation runbooks.
+- Automated remediation plan execution with confirmation and rollback notes.
+- Coverage reporting and broader integration tests on real Windows 11 systems.
