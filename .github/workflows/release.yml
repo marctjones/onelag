@@ -60,8 +60,9 @@ jobs:
           & $exe version
           $root = Join-Path $env:RUNNER_TEMP "OneLagReleaseSmokeRoot"
           $report = Join-Path $env:RUNNER_TEMP "onelag-release-report.md"
-          New-Item -ItemType Directory -Force -Path (Join-Path $root "Documents") | Out-Null
-          "content" | Set-Content (Join-Path $root "Documents/file.txt")
+          $documents = Join-Path $root "Documents"
+          New-Item -ItemType Directory -Force -Path $documents | Out-Null
+          "content" | Set-Content (Join-Path $documents "file.txt")
           & $exe scan --root $root --output $report --max-items 1000
           if ($LASTEXITCODE -ne 0) {
             throw "scan smoke failed with exit code $LASTEXITCODE"
@@ -73,6 +74,7 @@ jobs:
           if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 1) {
             throw "repair dry-run returned unexpected exit code $LASTEXITCODE"
           }
+          exit 0
 
       - name: Create installer bundle
         shell: pwsh
