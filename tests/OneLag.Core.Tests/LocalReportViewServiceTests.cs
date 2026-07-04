@@ -91,6 +91,41 @@ public sealed class LocalReportViewServiceTests
         }
     }
 
+    [Fact]
+    public void SummarizesDiagnosticMarkdownFindingWithoutDuplicatingEvidence()
+    {
+        var tempRoot = CreateTempRoot();
+        try
+        {
+            var path = Path.Combine(tempRoot, "diagnostic.md");
+            File.WriteAllText(path, """
+                # OneLag Diagnostic Report
+
+                - Diagnosis: `OneDrivePossible`
+
+                ## Recent Windows Events
+                - `System` `Disk` event `153` `Warning` count `2` newest `2026-07-04T12:00:00.0000000+00:00`
+
+                ## Findings
+                - **HighRisk**: Development folders are inside OneDrive. Dependency caches can churn heavily. Confidence: `high`.
+
+                ## Recommendations
+                - **Move development folders** (`MoveOutOfOneDrive`): Review a dry-run move plan. Safety: Requires explicit execution.
+                """);
+
+            var summary = new LocalReportViewService().Summarize(path);
+            var finding = Assert.Single(summary.Timeline, item => item.Kind == "finding");
+
+            Assert.Equal("HighRisk: Development folders are inside OneDrive", finding.Summary);
+            Assert.Contains("Confidence: high", finding.Evidence);
+            Assert.NotEqual(finding.Summary, finding.Evidence);
+        }
+        finally
+        {
+            Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+
     private static string CreateTempRoot()
     {
         var path = Path.Combine(Path.GetTempPath(), "onelag-report-view-tests", Guid.NewGuid().ToString("N"));

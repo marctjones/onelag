@@ -101,6 +101,8 @@ That command collects Cobertura coverage, merges duplicate source lines across t
 
 GitHub CI runs the same Release build and tests on macOS and Windows. macOS CI uploads coverage artifacts, and Windows CI runs the published `onelag.exe` for `version`, `scan`, and `repair reset-onedrive` smoke coverage.
 
+Sample redacted reports are checked in under [samples](samples/). Review [privacy and support bundle guidance](docs/privacy-and-support-bundles.md) before sharing reports, traces, or logs.
+
 ## What We Are Working On
 
 We are building a tool that answers these questions on a Windows machine:
@@ -155,6 +157,7 @@ Implemented in the current preview:
 - Watch report episode detection that groups timer-drift samples and manual lag markers into inferred categories.
 - UI-neutral report-view service plus `onelag view` for saved diagnostic and watch report summaries.
 - Coverage collection, merged coverage summary, and CI artifact upload with initial ratchet gates.
+- Redacted sample diagnostic/watch reports and privacy/support-bundle guidance.
 - Cross-platform test framework with core unit tests, Windows-layer parser tests, CLI process tests, local macOS validation, Windows CI, and release-time Windows executable smoke tests.
 - Windows x64 self-contained publish and PowerShell installer bundle.
 - GitHub Actions release workflow for test, publish, package, and release artifacts.

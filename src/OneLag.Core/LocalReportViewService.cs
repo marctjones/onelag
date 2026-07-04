@@ -171,11 +171,12 @@ public sealed class LocalReportViewService : IReportViewService
         {
             foreach (var line in findingLines.Where(IsBullet).Take(20))
             {
+                var evidence = CleanMarkdownText(line);
                 timeline.Add(new ReportTimelineItem(
                     null,
                     "finding",
-                    CleanMarkdownText(line),
-                    CleanMarkdownText(line)));
+                    MarkdownFindingSummary(evidence),
+                    evidence));
             }
         }
 
@@ -388,6 +389,22 @@ public sealed class LocalReportViewService : IReportViewService
     {
         var values = BacktickValues(line).ToArray();
         return values.Length >= 3 ? $"{values[2]} episode" : "Lag episode";
+    }
+
+    private static string MarkdownFindingSummary(string evidence)
+    {
+        var colonIndex = evidence.IndexOf(": ", StringComparison.Ordinal);
+        if (colonIndex >= 0)
+        {
+            var firstSentenceEnd = evidence.IndexOf(". ", colonIndex + 2, StringComparison.Ordinal);
+            if (firstSentenceEnd > 0)
+            {
+                return evidence[..firstSentenceEnd];
+            }
+        }
+
+        var confidenceIndex = evidence.IndexOf(". Confidence:", StringComparison.OrdinalIgnoreCase);
+        return confidenceIndex > 0 ? evidence[..confidenceIndex] : evidence;
     }
 
     private static IEnumerable<string> BacktickValues(string line)
