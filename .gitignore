@@ -5,7 +5,7 @@ obj/
 .vscode/
 TestResults/
 artifacts/
-onelag-report*.md
+/onelag*.md
 onelag-watch-report*.md
 *.user
 *.suo

@@ -138,6 +138,7 @@ Implemented in the current preview:
 - WPR/WPA and ProcMon escalation-plan generation for inconclusive responsiveness pressure, without automatically starting heavy tracing.
 - Dry-run remediation move-plan generation with explicit execution flags, rollback script, verification script, and destination-space evidence.
 - `onelag watch` bounded foreground recorder with start, stop, status, mark, and report commands.
+- Watch report episode detection that groups timer-drift samples and manual lag markers into inferred categories.
 - Cross-platform test framework with core unit tests, Windows-layer parser tests, CLI process tests, local macOS validation, Windows CI, and release-time Windows executable smoke tests.
 - Windows x64 self-contained publish and PowerShell installer bundle.
 - GitHub Actions release workflow for test, publish, package, and release artifacts.

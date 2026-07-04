@@ -73,7 +73,9 @@ public sealed class CliSmokeTests : IDisposable
 
         Assert.Equal(0, report.ExitCode);
         Assert.True(File.Exists(reportPath));
-        Assert.Contains("OneLag Watch Report", await File.ReadAllTextAsync(reportPath));
+        var contents = await File.ReadAllTextAsync(reportPath);
+        Assert.Contains("OneLag Watch Report", contents);
+        Assert.Contains("## Episodes", contents);
     }
 
     [Fact]

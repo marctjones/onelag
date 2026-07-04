@@ -691,11 +691,27 @@ internal static class Program
             lines.Add($"- Max timer drift: `{samples.Max(sample => sample.TimerDriftMilliseconds):N1} ms`");
         }
 
+        var episodes = WatchEpisodeDetector.Detect(samples, markers);
+
         lines.Add("");
         lines.Add("## Markers");
         foreach (var marker in markers)
         {
             lines.Add($"- `{marker.Timestamp:O}` from `{marker.Source}`{(string.IsNullOrWhiteSpace(marker.Note) ? "" : $": {marker.Note}")}");
+        }
+
+        lines.Add("");
+        lines.Add("## Episodes");
+        if (episodes.Count == 0)
+        {
+            lines.Add("- No lag episodes crossed the timer-drift threshold and no manual markers were recorded.");
+        }
+        else
+        {
+            foreach (var episode in episodes)
+            {
+                lines.Add($"- `{episode.StartedAt:O}` to `{episode.FinishedAt:O}` `{episode.Category}` confidence `{episode.Confidence}`: {episode.Evidence}");
+            }
         }
 
         lines.Add("");
@@ -707,7 +723,7 @@ internal static class Program
 
         lines.Add("");
         lines.Add("## Interpretation");
-        lines.Add("Timer drift is a user-mode responsiveness canary. It can show that normal work was delayed, but WPR/WPA is required to prove driver DPC/ISR root cause.");
+        lines.Add("Timer drift is a user-mode responsiveness canary. Episode categories are inferred from nearby user-mode samples. WPR/WPA is required to prove driver DPC/ISR root cause.");
         return string.Join(Environment.NewLine, lines) + Environment.NewLine;
     }
 
