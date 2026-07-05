@@ -19,4 +19,15 @@ dotnet publish src/OneLag.Cli/OneLag.Cli.csproj \
   --output "$publish_dir"
 
 test -f "$publish_dir/onelag.exe"
-echo "Local validation passed. Windows publish artifact: $publish_dir/onelag.exe"
+
+gui_publish_dir="tmp/local-validation/publish/win-x64-gui"
+dotnet publish src/OneLag.Gui/OneLag.Gui.csproj \
+  --configuration Release \
+  --runtime win-x64 \
+  --self-contained true \
+  -p:PublishSingleFile=true \
+  -p:Version=0.1.0-local \
+  --output "$gui_publish_dir"
+
+test -f "$gui_publish_dir/onelag-gui.exe"
+echo "Local validation passed. Windows publish artifacts: $publish_dir/onelag.exe and $gui_publish_dir/onelag-gui.exe"

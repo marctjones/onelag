@@ -4,28 +4,28 @@ OneLag should keep diagnostic logic in UI-neutral application services. CLI, gui
 
 ## Current Decision
 
-Use a guided console and local report viewer before building a full TUI.
+Use a guided console and local report viewer before building a full TUI. For the native Windows app, use Windows Forms for the first tray/GUI surface.
 
 Reasons:
 
 - The tool is safety-sensitive and benefits from explicit prompts, generated files, and copyable command output.
 - A full terminal UI would add rendering and keyboard-navigation complexity without improving diagnostic accuracy.
 - Report summaries and timeline items are now represented by `IReportViewService`, which can be reused by CLI, tray, and native GUI code.
-- Native tray and GUI work should wait until scan/watch contracts are stable enough to avoid reimplementing business logic in the UI.
+- Windows Forms keeps the first native UI small, local, and packageable with the CLI while scan/watch/remediation behavior remains in shared services.
 
 ## Implemented Surface
 
 - `onelag interactive` provides a guided console entry point for scan, watch, marking lag, reset-plan review, trace-plan generation, and saved-report viewing.
 - `onelag view --report PATH [--timeline]` summarizes saved diagnostic and watch reports.
+- `onelag-gui.exe` provides a native Windows tray icon and dashboard tabs for scan, watch, report viewing, and guarded remediation.
 - Diagnostic JSON reports are parsed structurally.
 - Diagnostic Markdown and watch Markdown reports are summarized using conservative section parsing.
 
 ## Native UI Direction
 
-The next native interface should be a small Windows tray controller for watch status and "mark lag now" before a full dashboard. A future GUI should expose:
+The first native interface is a Windows tray controller plus dashboard. Future GUI work should deepen:
 
-- Scan and watch status.
-- Episode timeline.
-- Privacy/export controls.
-- Reset and remediation plans as reviewable files.
 - Accessibility validation for keyboard use, high contrast, text scaling, and screen readers.
+- More detailed episode timeline filtering.
+- Files On-Demand and OneDrive account-state validation.
+- Signed installer integration and optional startup registration with explicit opt-in.

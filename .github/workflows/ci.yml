@@ -53,7 +53,7 @@ jobs:
             tmp/coverage/**/*.xml
             tmp/coverage/coverage-summary.txt
 
-      - name: Publish Windows x64 compile check
+      - name: Publish Windows x64 CLI compile check
         run: >
           dotnet publish src/OneLag.Cli/OneLag.Cli.csproj
           --configuration Release
@@ -63,12 +63,27 @@ jobs:
           -p:Version=0.1.0-ci.${{ github.run_number }}
           --output artifacts/publish/win-x64
 
+      - name: Publish Windows x64 GUI compile check
+        run: >
+          dotnet publish src/OneLag.Gui/OneLag.Gui.csproj
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:Version=0.1.0-ci.${{ github.run_number }}
+          --output artifacts/publish/win-x64-gui
+
       - name: Smoke published Windows executable
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $exe = Join-Path $PWD "artifacts/publish/win-x64/onelag.exe"
+          $gui = Join-Path $PWD "artifacts/publish/win-x64-gui/onelag-gui.exe"
           & $exe version
+          $guiSmoke = Start-Process -FilePath $gui -ArgumentList "--smoke" -Wait -PassThru
+          if ($guiSmoke.ExitCode -ne 0) {
+            throw "gui smoke failed with exit code $($guiSmoke.ExitCode)"
+          }
           $root = Join-Path $env:RUNNER_TEMP "OneLagSmokeRoot"
           $report = Join-Path $env:RUNNER_TEMP "onelag-ci-report.md"
           $documents = Join-Path $root "Documents"

@@ -1,6 +1,6 @@
 # OneLag Windows Installer Bundle
 
-This bundle contains a self-contained Windows x64 build of `onelag.exe`.
+This bundle contains self-contained Windows x64 builds of `onelag.exe` and `onelag-gui.exe`.
 
 Install for the current user:
 
@@ -14,6 +14,7 @@ Open a new terminal, then run:
 ```powershell
 onelag version
 onelag scan --output onelag-report.md
+onelag-gui
 ```
 
 Start a bounded foreground responsiveness recorder:
@@ -38,6 +39,14 @@ Execute reset only after reviewing the dry run and confirming your work policy:
 
 ```powershell
 onelag repair reset-onedrive --execute --i-understand-reset-disconnects-sync
+```
+
+Generate and execute a reviewed move plan only after pausing OneDrive and confirming the destination:
+
+```powershell
+onelag remediate move-plan --source "$env:USERPROFILE\OneDrive\project" --destination "C:\LocalDev\project"
+onelag remediate move --source "$env:USERPROFILE\OneDrive\project" --destination "C:\LocalDev\project" --execute --i-understand-moves-files
+onelag remediate verify --source "$env:USERPROFILE\OneDrive\project" --destination "C:\LocalDev\project"
 ```
 
 Uninstall:

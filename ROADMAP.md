@@ -2,7 +2,7 @@
 
 Live tracker: [GitHub milestones](https://github.com/marctjones/onelag/milestones) and implementation issues [#1](https://github.com/marctjones/onelag/issues/1) through [#60](https://github.com/marctjones/onelag/issues/60). Treat GitHub milestones and issues as the implementation source of truth; keep this file synchronized when tracker scope changes.
 
-Current release status: the latest installable preview implements the core .NET solution, `scan`, fuller OneDrive known-issue detection, OneDrive client-cache health metadata, Windows system-pressure sampling with PDH/process/memory/power signals when available, recent Event Viewer summary correlation when available, WPR/WPA and ProcMon escalation-plan generation, dry-run remediation move-plan generation, supported reset dry-run/explicit execution, bounded foreground `watch` with episode detection, UI-neutral report viewing, local macOS validation, coverage collection, sample reports, privacy/support-bundle guidance, Windows CI smoke validation, release packaging, and a Windows x64 PowerShell installer bundle. It does not complete every roadmap issue; native tray/GUI, a signed MSI/EXE installer, deeper WPR/WPA and ProcMon trace execution/validation, broader remediation execution, and broad Windows 11 integration coverage remain open.
+Current release status: the latest installable preview implements the core .NET solution, `scan`, fuller OneDrive known-issue detection, OneDrive client-cache health metadata, Windows system-pressure sampling with PDH/process/memory/power signals when available, recent Event Viewer summary correlation when available, WPR/WPA and ProcMon escalation-plan generation, dry-run remediation move-plan generation, direct move/verify/rollback execution behind explicit confirmation flags, supported reset dry-run/explicit execution, bounded foreground `watch` with episode detection, UI-neutral report viewing, native Windows Forms tray/GUI, local macOS validation, coverage collection, sample reports, privacy/support-bundle guidance, Windows CI smoke validation, release packaging, and a Windows x64 PowerShell installer bundle. It does not complete every roadmap issue; a signed MSI/EXE installer, deeper WPR/WPA and ProcMon trace execution/validation, Files On-Demand validation, and real Windows 11 laptop validation remain open.
 
 ## v0.1 - Documentation And Scanner Foundation
 
@@ -58,6 +58,7 @@ Tracker: [v0.5 milestone](https://github.com/marctjones/onelag/milestone/5), iss
 - Add destination free-space checks.
 - Add explicit confirmation flow for executing generated moves.
 - Add rollback and verification instructions.
+- Add direct move, verify, and rollback commands behind explicit confirmation.
 - Keep OneDrive reset and process kill as manual emergency actions.
 
 ## v0.6 - Release Hardening

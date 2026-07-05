@@ -121,8 +121,8 @@ Tasks:
 - Generate dry-run PowerShell move plans.
 - Verify destination free space before execution.
 - Generate pause-sync and reset instructions, not automatic sync manipulation by default.
-- Add explicit `--execute` mode behind confirmation prompts.
-- Add rollback notes for every generated move.
+- Add explicit `--execute` mode behind confirmation prompts. Status: implemented for direct move, rollback, and reset commands.
+- Add rollback notes for every generated move. Status: implemented in generated move plans and direct rollback command.
 
 Acceptance:
 
@@ -178,10 +178,10 @@ Tasks:
 - Add a guided interactive console flow. Status: implemented for the current CLI workflows.
 - Record a TUI-versus-guided-console decision. Status: documented in `docs/interface-strategy.md`.
 - Generate a local report and episode timeline viewer. Status: implemented with `onelag view --report PATH [--timeline]`.
-- Add an optional tray controller for watch mode.
-- Choose and scaffold a native Windows GUI framework.
-- Build scan/watch dashboard, lag-marker UX, privacy/export controls, and accessibility validation.
-- Package CLI, GUI, and tray artifacts with explicit startup opt-in.
+- Add an optional tray controller for watch mode. Status: implemented with a Windows Forms tray icon.
+- Choose and scaffold a native Windows GUI framework. Status: implemented with Windows Forms because it is native, small, and easy to package with the CLI.
+- Build scan/watch dashboard, lag-marker UX, privacy/export controls, and accessibility validation. Status: scan/watch/report/remediation dashboard implemented; broader accessibility validation remains open.
+- Package CLI, GUI, and tray artifacts with explicit startup opt-in. Status: release bundle includes CLI and GUI; no startup registration is created.
 
 Acceptance:
 

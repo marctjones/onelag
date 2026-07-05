@@ -1,0 +1,17 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\OneLag.Core\OneLag.Core.csproj" />
+    <ProjectReference Include="..\OneLag.Windows\OneLag.Windows.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <AssemblyName>onelag-gui</AssemblyName>
+    <RootNamespace>OneLag.Gui</RootNamespace>
+  </PropertyGroup>
+
+</Project>

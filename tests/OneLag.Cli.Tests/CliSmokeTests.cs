@@ -147,6 +147,58 @@ public sealed class CliSmokeTests : IDisposable
         Assert.Contains("Move plan:", result.StandardOutput);
         Assert.Contains("-Execute -IUnderstandMovesFiles", await File.ReadAllTextAsync(Path.Combine(output, "Move-OneLagItems.ps1")));
         Assert.Contains("Rollback", await File.ReadAllTextAsync(Path.Combine(output, "move-plan.md")));
+
+        var dryRun = await RunCli(
+            "remediate",
+            "move",
+            "--source",
+            source,
+            "--destination",
+            destination);
+
+        Assert.Equal(0, dryRun.ExitCode);
+        Assert.Contains("Dry run only", dryRun.StandardOutput);
+        Assert.True(Directory.Exists(source));
+        Assert.False(Directory.Exists(destination));
+
+        var move = await RunCli(
+            "remediate",
+            "move",
+            "--source",
+            source,
+            "--destination",
+            destination,
+            "--execute",
+            "--i-understand-moves-files");
+
+        Assert.Equal(0, move.ExitCode);
+        Assert.False(Directory.Exists(source));
+        Assert.True(Directory.Exists(destination));
+
+        var verify = await RunCli(
+            "remediate",
+            "verify",
+            "--source",
+            source,
+            "--destination",
+            destination);
+
+        Assert.Equal(0, verify.ExitCode);
+        Assert.Contains("Destination exists: True", verify.StandardOutput);
+
+        var rollback = await RunCli(
+            "remediate",
+            "rollback",
+            "--source",
+            source,
+            "--destination",
+            destination,
+            "--execute",
+            "--i-understand-moves-files");
+
+        Assert.Equal(0, rollback.ExitCode);
+        Assert.True(Directory.Exists(source));
+        Assert.False(Directory.Exists(destination));
     }
 
     public void Dispose()

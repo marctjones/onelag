@@ -215,6 +215,9 @@ internal static class Program
         return args[0].ToLowerInvariant() switch
         {
             "move-plan" => RunMovePlan(args[1..], cancellationToken),
+            "move" => RunMove(args[1..], cancellationToken),
+            "rollback" => RunRollback(args[1..], cancellationToken),
+            "verify" => RunMoveVerify(args[1..], cancellationToken),
             _ => UnknownCommand($"remediate {args[0]}")
         };
     }
@@ -265,6 +268,124 @@ internal static class Program
         Console.WriteLine($"Bytes: {summary.TotalBytes:N0}");
         Console.WriteLine($"Destination has enough space: {summary.DestinationHasEnoughSpace?.ToString() ?? "unknown"}");
         return 0;
+    }
+
+    private static int RunMove(string[] args, CancellationToken cancellationToken)
+    {
+        var options = ParseMoveExecutionOptions(args, "remediate move");
+        var result = MovePlanExecutor.Move(options, cancellationToken);
+        PrintMoveExecutionResult(result);
+        return 0;
+    }
+
+    private static int RunRollback(string[] args, CancellationToken cancellationToken)
+    {
+        var options = ParseMoveExecutionOptions(args, "remediate rollback");
+        var result = MovePlanExecutor.Rollback(options, cancellationToken);
+        PrintMoveExecutionResult(result);
+        return 0;
+    }
+
+    private static int RunMoveVerify(string[] args, CancellationToken cancellationToken)
+    {
+        string? source = null;
+        string? destination = null;
+        var maxItems = 100_000;
+
+        for (var i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--source":
+                    source = RequireValue(args, ref i, "--source");
+                    break;
+                case "--destination":
+                    destination = RequireValue(args, ref i, "--destination");
+                    break;
+                case "--max-items":
+                    maxItems = int.Parse(RequireValue(args, ref i, "--max-items"), CultureInfo.InvariantCulture);
+                    break;
+                default:
+                    throw new ArgumentException($"Unknown remediate verify argument '{args[i]}'.");
+            }
+        }
+
+        if (source is null)
+        {
+            throw new ArgumentException("--source is required.");
+        }
+
+        if (destination is null)
+        {
+            throw new ArgumentException("--destination is required.");
+        }
+
+        var result = MovePlanExecutor.Verify(source, destination, maxItems, cancellationToken);
+        PrintMoveExecutionResult(result);
+        return result.DestinationExists ? 0 : 1;
+    }
+
+    private static MoveExecutionOptions ParseMoveExecutionOptions(string[] args, string commandName)
+    {
+        string? source = null;
+        string? destination = null;
+        var maxItems = 100_000;
+        var execute = false;
+        var acknowledged = false;
+
+        for (var i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--source":
+                    source = RequireValue(args, ref i, "--source");
+                    break;
+                case "--destination":
+                    destination = RequireValue(args, ref i, "--destination");
+                    break;
+                case "--max-items":
+                    maxItems = int.Parse(RequireValue(args, ref i, "--max-items"), CultureInfo.InvariantCulture);
+                    break;
+                case "--execute":
+                    execute = true;
+                    break;
+                case "--i-understand-moves-files":
+                    acknowledged = true;
+                    break;
+                default:
+                    throw new ArgumentException($"Unknown {commandName} argument '{args[i]}'.");
+            }
+        }
+
+        if (source is null)
+        {
+            throw new ArgumentException("--source is required.");
+        }
+
+        if (destination is null)
+        {
+            throw new ArgumentException("--destination is required.");
+        }
+
+        return new MoveExecutionOptions(source, destination, execute, acknowledged, maxItems);
+    }
+
+    private static void PrintMoveExecutionResult(MoveExecutionResult result)
+    {
+        Console.WriteLine($"Operation: {result.Operation}");
+        Console.WriteLine($"Executed: {result.Executed}");
+        Console.WriteLine($"Source: {result.Source}");
+        Console.WriteLine($"Destination: {result.Destination}");
+        Console.WriteLine($"Source exists: {result.SourceExists}");
+        Console.WriteLine($"Destination exists: {result.DestinationExists}");
+        Console.WriteLine($"Files: {result.FileCount:N0}");
+        Console.WriteLine($"Directories: {result.DirectoryCount:N0}");
+        Console.WriteLine($"Bytes: {result.TotalBytes:N0}");
+        Console.WriteLine($"Capped: {result.WasCapped}");
+        Console.WriteLine($"Destination available bytes: {result.DestinationAvailableBytes?.ToString("N0", CultureInfo.InvariantCulture) ?? "unknown"}");
+        Console.WriteLine($"Destination has enough space: {result.DestinationHasEnoughSpace?.ToString() ?? "unknown"}");
+        Console.WriteLine($"Inaccessible paths: {result.InaccessiblePaths.Count:N0}");
+        Console.WriteLine(result.Message);
     }
 
     private static int RunView(string[] args)
@@ -433,62 +554,21 @@ internal static class Program
             throw new ArgumentException("--max-samples must be greater than zero.");
         }
 
-        var directory = Path.GetFullPath(output);
-        Directory.CreateDirectory(directory);
-        File.Delete(Path.Combine(directory, "stop.request"));
-
-        var statePath = Path.Combine(directory, "state.json");
-        var samplesPath = Path.Combine(directory, "samples.ndjson");
         var platform = new WindowsPlatformProbe();
-        var startedAt = DateTimeOffset.UtcNow;
-        var expected = Stopwatch.StartNew();
-        var nextExpected = interval;
-        var sampleCount = 0;
+        var watch = new WatchService();
+        var directory = Path.GetFullPath(output);
 
         Console.WriteLine($"Watch started for {duration}. Output: {directory}");
         Console.WriteLine("Press Ctrl+C to stop, or run `onelag watch stop --output <dir>` from another terminal.");
-        WriteWatchState(statePath, startedAt, directory, sampleCount, "running");
-
-        while (!cancellationToken.IsCancellationRequested && DateTimeOffset.UtcNow - startedAt < duration)
-        {
-            if (File.Exists(Path.Combine(directory, "stop.request")))
-            {
-                break;
-            }
-
-            await Task.Delay(interval, cancellationToken);
-            var drift = (expected.Elapsed - nextExpected).TotalMilliseconds;
-            nextExpected += interval;
-
-            var sample = new WatchSample(
-                DateTimeOffset.UtcNow,
-                drift,
-                platform.CaptureTelemetry(),
-                platform.CaptureSystemPressure(),
-                platform.GetForegroundProcessName());
-
-            AppendJsonLine(samplesPath, sample);
-            sampleCount++;
-
-            if (sampleCount > maxSamples)
-            {
-                TrimJsonLines(samplesPath, maxSamples);
-                sampleCount = maxSamples;
-            }
-
-            WriteWatchState(statePath, startedAt, directory, sampleCount, "running");
-        }
-
-        WriteWatchState(statePath, startedAt, directory, sampleCount, "stopped");
-        Console.WriteLine($"Watch stopped. Samples: {sampleCount:N0}");
+        var summary = await watch.StartAsync(new WatchStartOptions(duration, interval, directory, maxSamples), platform, cancellationToken);
+        Console.WriteLine($"Watch stopped. Samples: {summary.Samples:N0}");
         return 0;
     }
 
     private static int WatchStop(string[] args)
     {
         var output = ParseOutputOnly(args);
-        Directory.CreateDirectory(output);
-        File.WriteAllText(Path.Combine(output, "stop.request"), DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+        new WatchService().RequestStop(output);
         Console.WriteLine($"Stop requested for watch directory: {output}");
         return 0;
     }
@@ -496,14 +576,14 @@ internal static class Program
     private static int WatchStatus(string[] args)
     {
         var output = ParseOutputOnly(args);
-        var statePath = Path.Combine(output, "state.json");
-        if (!File.Exists(statePath))
+        var state = new WatchService().ReadState(output);
+        if (state is null)
         {
             Console.WriteLine($"No watch state found in {output}");
             return 1;
         }
 
-        Console.WriteLine(File.ReadAllText(statePath));
+        Console.WriteLine(JsonSerializer.Serialize(state, JsonOptions));
         return 0;
     }
 
@@ -527,9 +607,7 @@ internal static class Program
             }
         }
 
-        Directory.CreateDirectory(output);
-        var marker = new WatchMarker(DateTimeOffset.UtcNow, "cli", note);
-        AppendJsonLine(Path.Combine(output, "markers.ndjson"), marker);
+        var marker = new WatchService().Mark(output, "cli", note);
         Console.WriteLine($"Lag marker written: {marker.Timestamp:O}");
         return 0;
     }
@@ -554,12 +632,7 @@ internal static class Program
             }
         }
 
-        var samples = ReadJsonLines<WatchSample>(Path.Combine(output, "samples.ndjson")).ToArray();
-        var markers = ReadJsonLines<WatchMarker>(Path.Combine(output, "markers.ndjson")).ToArray();
-        var report = BuildWatchReport(samples, markers);
-        var fullReportPath = Path.GetFullPath(reportPath);
-        Directory.CreateDirectory(Path.GetDirectoryName(fullReportPath) ?? Environment.CurrentDirectory);
-        File.WriteAllText(fullReportPath, report);
+        var fullReportPath = new WatchService().WriteReport(output, reportPath);
         Console.WriteLine($"Watch report: {fullReportPath}");
         return 0;
     }
@@ -688,60 +761,7 @@ internal static class Program
 
     private static string GetDefaultWatchDirectory()
     {
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        if (string.IsNullOrWhiteSpace(localAppData))
-        {
-            localAppData = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".onelag");
-        }
-
-        return Path.Combine(localAppData, "OneLag", "watch");
-    }
-
-    private static void AppendJsonLine<T>(string path, T value)
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(path) ?? Environment.CurrentDirectory);
-        File.AppendAllText(path, JsonSerializer.Serialize(value, LineJsonOptions) + Environment.NewLine);
-    }
-
-    private static IEnumerable<T> ReadJsonLines<T>(string path)
-    {
-        if (!File.Exists(path))
-        {
-            yield break;
-        }
-
-        foreach (var line in File.ReadLines(path))
-        {
-            if (string.IsNullOrWhiteSpace(line))
-            {
-                continue;
-            }
-
-            var value = JsonSerializer.Deserialize<T>(line, LineJsonOptions);
-            if (value is not null)
-            {
-                yield return value;
-            }
-        }
-    }
-
-    private static void TrimJsonLines(string path, int maxLines)
-    {
-        var lines = File.ReadLines(path).TakeLast(maxLines).ToArray();
-        File.WriteAllLines(path, lines);
-    }
-
-    private static void WriteWatchState(string path, DateTimeOffset startedAt, string directory, int samples, string state)
-    {
-        var payload = new
-        {
-            state,
-            startedAt,
-            updatedAt = DateTimeOffset.UtcNow,
-            directory,
-            samples
-        };
-        File.WriteAllText(path, JsonSerializer.Serialize(payload, JsonOptions));
+        return WatchService.GetDefaultDirectory();
     }
 
     private static void PrintLocalReportSummary(LocalReportSummary summary, bool showFullTimeline)
@@ -787,59 +807,6 @@ internal static class Program
                 Console.WriteLine($"- {action}");
             }
         }
-    }
-
-    private static string BuildWatchReport(IReadOnlyList<WatchSample> samples, IReadOnlyList<WatchMarker> markers)
-    {
-        var lines = new List<string>
-        {
-            "# OneLag Watch Report",
-            "",
-            $"- Samples: `{samples.Count:N0}`",
-            $"- Markers: `{markers.Count:N0}`"
-        };
-
-        if (samples.Count > 0)
-        {
-            lines.Add($"- First sample: `{samples[0].Timestamp:O}`");
-            lines.Add($"- Last sample: `{samples[^1].Timestamp:O}`");
-            lines.Add($"- Max timer drift: `{samples.Max(sample => sample.TimerDriftMilliseconds):N1} ms`");
-        }
-
-        var episodes = WatchEpisodeDetector.Detect(samples, markers);
-
-        lines.Add("");
-        lines.Add("## Markers");
-        foreach (var marker in markers)
-        {
-            lines.Add($"- `{marker.Timestamp:O}` from `{marker.Source}`{(string.IsNullOrWhiteSpace(marker.Note) ? "" : $": {marker.Note}")}");
-        }
-
-        lines.Add("");
-        lines.Add("## Episodes");
-        if (episodes.Count == 0)
-        {
-            lines.Add("- No lag episodes crossed the timer-drift threshold and no manual markers were recorded.");
-        }
-        else
-        {
-            foreach (var episode in episodes)
-            {
-                lines.Add($"- `{episode.StartedAt:O}` to `{episode.FinishedAt:O}` `{episode.Category}` confidence `{episode.Confidence}`: {episode.Evidence}");
-            }
-        }
-
-        lines.Add("");
-        lines.Add("## Largest Timer Delays");
-        foreach (var sample in samples.OrderByDescending(sample => sample.TimerDriftMilliseconds).Take(10))
-        {
-            lines.Add($"- `{sample.Timestamp:O}` drift `{sample.TimerDriftMilliseconds:N1} ms`, foreground `{sample.ForegroundProcess ?? "unknown"}`, telemetry `{sample.Telemetry.EvidenceState}`");
-        }
-
-        lines.Add("");
-        lines.Add("## Interpretation");
-        lines.Add("Timer drift is a user-mode responsiveness canary. Episode categories are inferred from nearby user-mode samples. WPR/WPA is required to prove driver DPC/ISR root cause.");
-        return string.Join(Environment.NewLine, lines) + Environment.NewLine;
     }
 
     private static void TrySetIdlePriority()
@@ -925,9 +892,13 @@ internal static class Program
 
         Commands:
           move-plan   Generate a dry-run move plan, execution script, rollback script, and verification script.
+          move        Move a reviewed folder only with explicit confirmation flags.
+          rollback    Move a reviewed folder back only with explicit confirmation flags.
+          verify      Verify source/destination existence and destination inventory.
 
         Safety:
           Generated scripts do not move files unless run with -Execute -IUnderstandMovesFiles.
+          Direct move and rollback commands default to dry-run and require --execute --i-understand-moves-files.
         """);
     }
 }
