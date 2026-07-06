@@ -2,7 +2,7 @@
 
 Live tracker: [GitHub milestones](https://github.com/marctjones/onelag/milestones) and implementation issues [#1](https://github.com/marctjones/onelag/issues/1) through [#60](https://github.com/marctjones/onelag/issues/60). Treat GitHub milestones and issues as the implementation source of truth; keep this file synchronized when tracker scope changes.
 
-Current release status: the latest installable preview implements the core .NET solution, `scan`, fuller OneDrive known-issue detection, OneDrive client-cache health metadata, Windows system-pressure sampling with PDH/process/memory/power signals when available, recent Event Viewer summary correlation when available, WPR/WPA and ProcMon escalation-plan generation, dry-run remediation move-plan generation, direct move/verify/rollback execution behind explicit confirmation flags, supported reset dry-run/explicit execution, bounded foreground `watch` with episode detection, UI-neutral report viewing, native Windows Forms tray/GUI, local macOS validation, coverage collection, sample reports, privacy/support-bundle guidance, Windows CI smoke validation, release packaging, and a Windows x64 PowerShell installer bundle. It does not complete every roadmap issue; a signed MSI/EXE installer, deeper WPR/WPA and ProcMon trace execution/validation, Files On-Demand validation, and real Windows 11 laptop validation remain open.
+Current release status: the latest installable preview implements the core .NET solution, `scan`, fuller OneDrive known-issue detection, OneDrive client-cache health metadata, Windows system-pressure sampling with PDH/process/memory/power signals when available, recent Event Viewer summary correlation when available, WPR/WPA and ProcMon escalation-plan generation, dry-run remediation move-plan generation, direct move/verify/rollback execution behind explicit confirmation flags, supported reset dry-run/explicit execution, bounded foreground `watch` with episode detection, UI-neutral report viewing, AI-ready offline support-bundle export for Codex/Claude Code review without an embedded local AI runtime, native Windows Forms tray/GUI, local macOS validation, coverage collection, sample reports, privacy/support-bundle guidance, Windows CI smoke validation, release packaging, and a Windows x64 PowerShell installer bundle. It does not complete every roadmap issue; a signed MSI/EXE installer, deeper WPR/WPA and ProcMon trace execution/validation, Files On-Demand validation, and real Windows 11 laptop validation remain open.
 
 ## v0.1 - Documentation And Scanner Foundation
 
@@ -70,6 +70,7 @@ Tracker: [v0.6 milestone](https://github.com/marctjones/onelag/milestone/6), iss
 - Add coverage collection and ratchet gates.
 - Add sample reports.
 - Add privacy and support-bundle docs.
+- Add automated offline support-bundle export for Codex/Claude Code analysis without adding a local AI runtime.
 - Publish `v0.1.0` once the scanner is useful and safe.
 
 ## v0.7 - Responsiveness Watch Mode

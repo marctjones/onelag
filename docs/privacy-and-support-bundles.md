@@ -6,6 +6,7 @@ OneLag reports are designed to be shareable only after review. The default scann
 
 - Redacted Markdown diagnostic reports.
 - Redacted watch reports.
+- `onelag support bundle` output after local review.
 - Generated trace-plan README and scripts.
 - Coverage summaries from CI.
 - OneLag version and release tag.
@@ -29,7 +30,25 @@ OneLag reports are designed to be shareable only after review. The default scann
 
 ## Support Bundle Shape
 
-Until automated support-bundle export is implemented, create a manual bundle with:
+Use the automated bundle command when you want to move evidence to another machine for Codex, Claude Code, a GitHub issue, Microsoft support, or internal IT review:
+
+```powershell
+onelag support bundle --report onelag-report.md --report onelag-watch-report.md --output onelag-support-bundle --zip
+```
+
+The generated bundle includes:
+
+1. Copied diagnostic and watch reports that you explicitly pass with `--report`.
+2. A generated watch report when you pass `--watch-output`.
+3. Report summaries derived from the copied reports.
+4. `manifest.json` with bundle format, report list, file sizes, and SHA-256 hashes.
+5. `ANALYZE_WITH_CODEX_OR_CLAUDE.md`, a ready-to-use offline analysis prompt.
+6. `privacy-checklist.md`, `user-notes.md`, and `environment.md`.
+7. Generated trace-plan runbooks when you pass `--include-trace-plan`.
+
+The command does not include raw OneDrive logs, OneDrive DAT/cache/database files, raw Event Viewer exports, WPR ETL traces, ProcMon PML captures, screenshots, document contents, keystrokes, clipboard data, or browser history.
+
+If you need to create a manual bundle, include:
 
 1. The redacted diagnostic report.
 2. The redacted watch report for the affected day.

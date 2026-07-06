@@ -69,6 +69,12 @@ Generate WPR/WPA and ProcMon escalation runbooks for unresolved responsiveness p
 onelag support trace-plan --output onelag-trace-plan
 ```
 
+Package redacted reports for offline analysis in Codex or Claude Code on another machine:
+
+```powershell
+onelag support bundle --report onelag-report.md --report onelag-watch-report.md --output onelag-support-bundle --zip
+```
+
 Summarize a saved diagnostic or watch report locally:
 
 ```powershell
@@ -141,6 +147,7 @@ The first implementation target is a .NET Windows console application because th
 - No silent file moves, deletes, OneDrive resets, or process kills.
 - No automatic WPR, ProcMon, clean boot, service disablement, Windows Search disablement, or Defender disablement in the default scan path.
 - No attempt to parse undocumented OneDrive database internals.
+- No embedded local AI runtime; offline AI review should use the explicit support bundle so evidence collection stays deterministic and inspectable.
 - No replacement for Microsoft 365 admin sync reports in managed tenants.
 - No generic cleaner that treats all large folders as disposable.
 
@@ -171,6 +178,7 @@ Implemented in the current preview:
 - `onelag watch` bounded foreground recorder with start, stop, status, mark, and report commands.
 - Watch report episode detection that groups timer-drift samples and manual lag markers into inferred categories.
 - UI-neutral report-view service plus `onelag view` for saved diagnostic and watch report summaries.
+- `onelag support bundle` for offline Codex/Claude Code analysis with copied reports, summaries, manifest, privacy checklist, user notes, environment snapshot, and a ready-to-use prompt.
 - Native Windows Forms tray/GUI with scan, watch, report view, and remediation controls.
 - Direct remediation move, verify, and rollback commands behind explicit confirmation flags.
 - Coverage collection, merged coverage summary, and CI artifact upload with initial ratchet gates.

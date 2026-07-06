@@ -173,6 +173,7 @@ internal static class Program
         return args[0].ToLowerInvariant() switch
         {
             "trace-plan" => RunTracePlan(args[1..]),
+            "bundle" => RunSupportBundle(args[1..]),
             _ => UnknownCommand($"support {args[0]}")
         };
     }
@@ -201,6 +202,74 @@ internal static class Program
             Console.WriteLine($"- {file}");
         }
 
+        return 0;
+    }
+
+    private static int RunSupportBundle(string[] args)
+    {
+        var output = "onelag-support-bundle";
+        var reports = new List<string>();
+        string? watchOutput = null;
+        string? note = null;
+        string? oneDriveStatus = null;
+        var includeTracePlan = false;
+        var zip = false;
+        var overwrite = false;
+
+        for (var i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--output":
+                case "-o":
+                    output = RequireValue(args, ref i, args[i]);
+                    break;
+                case "--report":
+                case "-r":
+                    reports.Add(RequireValue(args, ref i, args[i]));
+                    break;
+                case "--watch-output":
+                    watchOutput = RequireValue(args, ref i, "--watch-output");
+                    break;
+                case "--note":
+                    note = RequireValue(args, ref i, "--note");
+                    break;
+                case "--onedrive-status":
+                    oneDriveStatus = RequireValue(args, ref i, "--onedrive-status");
+                    break;
+                case "--include-trace-plan":
+                    includeTracePlan = true;
+                    break;
+                case "--zip":
+                    zip = true;
+                    break;
+                case "--overwrite":
+                    overwrite = true;
+                    break;
+                default:
+                    throw new ArgumentException($"Unknown support bundle argument '{args[i]}'.");
+            }
+        }
+
+        var writer = new SupportBundleWriter(versionProvider: _ => GetVersionText());
+        var result = writer.Write(new SupportBundleOptions(
+            output,
+            reports,
+            watchOutput,
+            includeTracePlan,
+            zip,
+            overwrite,
+            note,
+            oneDriveStatus));
+
+        Console.WriteLine($"Support bundle: {result.OutputDirectory}");
+        if (result.ZipPath is not null)
+        {
+            Console.WriteLine($"Zip: {result.ZipPath}");
+        }
+
+        Console.WriteLine("Open ANALYZE_WITH_CODEX_OR_CLAUDE.md in Codex or Claude Code on the analysis machine.");
+        Console.WriteLine($"Files: {result.Files.Count:N0}");
         return 0;
     }
 
@@ -689,13 +758,18 @@ internal static class Program
 
     private static int RunVersion()
     {
+        Console.WriteLine(GetVersionText());
+        return 0;
+    }
+
+    private static string GetVersionText()
+    {
         var version = typeof(Program).Assembly
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
             .InformationalVersion
             ?? typeof(Program).Assembly.GetName().Version?.ToString()
             ?? "unknown";
-        Console.WriteLine($"OneLag {version}");
-        return 0;
+        return $"OneLag {version}";
     }
 
     private static int UnknownCommand(string command)
@@ -838,6 +912,7 @@ internal static class Program
           watch report [--output DIR] [--report PATH]
           repair reset-onedrive [--execute --i-understand-reset-disconnects-sync]
           support trace-plan [--output DIR]
+          support bundle --report PATH [--report PATH] [--watch-output DIR] [--output DIR] [--zip]
           remediate move-plan --source PATH --destination PATH [--output DIR]
           view --report PATH [--timeline]
           interactive
@@ -879,9 +954,14 @@ internal static class Program
 
         Commands:
           trace-plan   Generate local WPR/WPA and ProcMon escalation runbooks and helper scripts.
+          bundle       Package redacted reports, summaries, manifest, privacy notes, and a Codex/Claude prompt.
 
         Safety:
-          The generated plan does not start tracing. Review the files, then run the WPR scripts manually on Windows.
+          The generated trace plan does not start tracing. Review the files, then run the WPR scripts manually on Windows.
+          The bundle excludes raw OneDrive logs, cache databases, ETL/PML traces, screenshots, document contents, and input data by default.
+
+        Bundle example:
+          support bundle --report onelag-report.md --report onelag-watch-report.md --output onelag-support-bundle --zip
         """);
     }
 

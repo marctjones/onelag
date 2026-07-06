@@ -120,6 +120,59 @@ public sealed class CliSmokeTests : IDisposable
     }
 
     [Fact]
+    public async Task SupportBundleWritesCodexClaudeReadyBundle()
+    {
+        var reportPath = Path.Combine(tempRoot, "report.md");
+        await File.WriteAllTextAsync(
+            reportPath,
+            """
+            # OneLag Diagnostic Report
+
+            - Started: `2026-07-05T10:00:00.0000000+00:00`
+            - Finished: `2026-07-05T10:01:00.0000000+00:00`
+            - Diagnosis: `OneDrivePossible`
+            - Telemetry: `windows-process-cpu-and-log-metadata`
+            - System pressure: `windows-pdh-process-and-win32-memory-snapshot`
+
+            ## Findings
+
+            - Warning: Recent Windows reliability events were observed. Evidence: Event Viewer had recent warnings. Confidence: medium.
+
+            ## Recommendations
+
+            - **Review evidence** (`Observe`): Review before changing files. Safety: No data is modified.
+            """);
+        var output = Path.Combine(tempRoot, "support-bundle");
+
+        var result = await RunCli(
+            "support",
+            "bundle",
+            "--report",
+            reportPath,
+            "--output",
+            output,
+            "--note",
+            "typing froze in Notepad",
+            "--onedrive-status",
+            "processing changes",
+            "--zip");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.True(File.Exists(Path.Combine(output, "ANALYZE_WITH_CODEX_OR_CLAUDE.md")));
+        Assert.True(File.Exists(Path.Combine(output, "manifest.json")));
+        Assert.True(File.Exists(Path.Combine(output, "privacy-checklist.md")));
+        Assert.True(File.Exists(Path.Combine(output, "user-notes.md")));
+        Assert.True(File.Exists(Path.Combine(output, "reports", "001-report.md")));
+        Assert.True(File.Exists(Path.Combine(output, "reports", "001-report.summary.md")));
+        Assert.True(File.Exists(output + ".zip"));
+        Assert.Contains("Support bundle:", result.StandardOutput);
+        Assert.Contains("Codex or Claude Code", await File.ReadAllTextAsync(Path.Combine(output, "ANALYZE_WITH_CODEX_OR_CLAUDE.md")));
+        Assert.Contains("typing froze in Notepad", await File.ReadAllTextAsync(Path.Combine(output, "user-notes.md")));
+        Assert.Contains("OneDrivePossible", await File.ReadAllTextAsync(Path.Combine(output, "reports", "001-report.summary.md")));
+        Assert.Contains("onelag-support-bundle-v1", await File.ReadAllTextAsync(Path.Combine(output, "manifest.json")));
+    }
+
+    [Fact]
     public async Task RemediateMovePlanWritesDryRunScripts()
     {
         var source = Path.Combine(tempRoot, "OneDrive", "project");
