@@ -1,8 +1,8 @@
 # Roadmap
 
-Live tracker: [GitHub milestones](https://github.com/marctjones/onelag/milestones) and implementation issues [#1](https://github.com/marctjones/onelag/issues/1) through [#60](https://github.com/marctjones/onelag/issues/60). Treat GitHub milestones and issues as the implementation source of truth; keep this file synchronized when tracker scope changes.
+Live tracker: [GitHub milestones](https://github.com/marctjones/onelag/milestones) and implementation issues [#1](https://github.com/marctjones/onelag/issues/1) through [#61](https://github.com/marctjones/onelag/issues/61). Treat GitHub milestones and issues as the implementation source of truth; keep this file synchronized when tracker scope changes.
 
-Current release status: the latest installable preview implements the core .NET solution, `scan`, fuller OneDrive known-issue detection, OneDrive client-cache health metadata, Windows system-pressure sampling with PDH/process/memory/power signals when available, recent Event Viewer summary correlation when available, WPR/WPA and ProcMon escalation-plan generation, dry-run remediation move-plan generation, direct move/verify/rollback execution behind explicit confirmation flags, supported reset dry-run/explicit execution, bounded foreground `watch` with episode detection, UI-neutral report viewing, AI-ready offline support-bundle export for Codex/Claude Code review without an embedded local AI runtime, native Windows Forms tray/GUI, local macOS validation, coverage collection, sample reports, privacy/support-bundle guidance, Windows CI smoke validation, release packaging, and a Windows x64 PowerShell installer bundle. It does not complete every roadmap issue; a signed MSI/EXE installer, deeper WPR/WPA and ProcMon trace execution/validation, Files On-Demand validation, and real Windows 11 laptop validation remain open.
+Current release status: the latest installable preview implements the core .NET solution, `scan`, fuller OneDrive known-issue detection, OneDrive client-cache health metadata, Windows system-pressure sampling with PDH/process/memory/power signals when available, recent Event Viewer summary correlation across core and selected operational channels when available, Files On-Demand attribute metadata sampling, WPR/WPA and ProcMon escalation-plan generation, dry-run remediation move-plan generation, direct move/verify/rollback execution behind explicit confirmation flags, supported reset dry-run/explicit execution, bounded foreground `watch` with episode detection, UI-neutral report viewing, AI-ready offline support-bundle export for Codex/Claude Code review without an embedded local AI runtime, native Windows Forms tray/GUI with support-bundle export, local macOS validation, coverage collection, sample reports, privacy/support-bundle guidance, Windows CI smoke validation, release packaging, and a Windows x64 PowerShell installer bundle. It does not complete every roadmap issue; a signed MSI/EXE installer, deeper WPR/WPA and ProcMon trace execution/validation, real Files On-Demand validation on Windows 11, all-day watch validation, and real Windows 11 laptop validation remain open.
 
 ## v0.1 - Documentation And Scanner Foundation
 
@@ -71,6 +71,7 @@ Tracker: [v0.6 milestone](https://github.com/marctjones/onelag/milestone/6), iss
 - Add sample reports.
 - Add privacy and support-bundle docs.
 - Add automated offline support-bundle export for Codex/Claude Code analysis without adding a local AI runtime.
+- Add release-hardening checklist and changelog.
 - Publish `v0.1.0` once the scanner is useful and safe.
 
 ## v0.7 - Responsiveness Watch Mode
@@ -97,6 +98,7 @@ Tracker: [v0.8 milestone](https://github.com/marctjones/onelag/milestone/8), iss
 - Add an optional tray controller for bounded watch mode.
 - Scaffold a native Windows GUI shell after a framework decision.
 - Build scan/watch dashboard, lag-marker UX, privacy/export controls, and accessibility validation.
+- Add GUI support-bundle export and system-color/DPI-friendly layout behavior.
 - Package CLI, GUI, and tray artifacts with explicit startup opt-in.
 
 ## Later

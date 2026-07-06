@@ -95,6 +95,16 @@ try {
     Invoke-Checked $onelag @("watch", "report", "--output", $watch, "--report", $watchReport)
     Invoke-Checked $onelag @("view", "--report", $watchReport, "--timeline")
 
+    $bundle = Join-Path $work "onelag-support-bundle"
+    Invoke-Checked $onelag @("support", "bundle", "--report", $report, "--report", $watchReport, "--output", $bundle, "--zip", "--include-trace-plan")
+    if (-not (Test-Path (Join-Path $bundle "ANALYZE_WITH_CODEX_OR_CLAUDE.md"))) {
+        throw "support bundle did not create analysis prompt"
+    }
+
+    if (-not (Test-Path "$bundle.zip")) {
+        throw "support bundle did not create zip"
+    }
+
     $moveSource = Join-Path $work "OneDriveMoveSource"
     $moveDestination = Join-Path $work "LocalMoveDestination"
     New-Item -ItemType Directory -Force -Path $moveSource | Out-Null

@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Reflection;
 using System.Runtime.Versioning;
 using System.Windows.Forms;
+using Microsoft.Win32;
 using OneLag.Core;
 using OneLag.Windows;
 
@@ -125,6 +126,14 @@ internal sealed class MainForm : Form
     private readonly Label watchStateLabel = new() { Text = "Watch state: unknown", AutoSize = true };
     private readonly TextBox reportPathBox = new();
     private readonly ListView reportList = new() { View = View.Details, FullRowSelect = true, Dock = DockStyle.Fill };
+    private readonly TextBox bundleReportPathBox = new();
+    private readonly TextBox bundleWatchDirectoryBox = new() { Text = WatchService.GetDefaultDirectory() };
+    private readonly TextBox bundleOutputBox = new() { Text = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "onelag-support-bundle") };
+    private readonly TextBox bundleNoteBox = new() { Multiline = true, Height = 72, ScrollBars = ScrollBars.Vertical };
+    private readonly TextBox bundleOneDriveStatusBox = new();
+    private readonly CheckBox bundleZipBox = new() { Text = "Zip bundle", AutoSize = true, Checked = true };
+    private readonly CheckBox bundleTracePlanBox = new() { Text = "Include trace plan", AutoSize = true };
+    private readonly CheckBox bundleOverwriteBox = new() { Text = "Overwrite output", AutoSize = true };
     private readonly TextBox remediationSourceBox = new();
     private readonly TextBox remediationDestinationBox = new();
     private readonly TextBox remediationOutputBox = new() { Text = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "onelag-move-plan") };
@@ -140,7 +149,11 @@ internal sealed class MainForm : Form
         Text = "OneLag";
         MinimumSize = new Size(980, 680);
         StartPosition = FormStartPosition.CenterScreen;
+        AutoScaleMode = AutoScaleMode.Dpi;
+        Font = SystemFonts.MessageBoxFont;
         BuildUi();
+        ApplySystemTheme();
+        SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
     }
 
     public async Task StartWatchFromTrayAsync()
@@ -196,12 +209,24 @@ internal sealed class MainForm : Form
         base.OnFormClosing(e);
     }
 
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
+            watchCancellation?.Dispose();
+        }
+
+        base.Dispose(disposing);
+    }
+
     private void BuildUi()
     {
         var tabs = new TabControl { Dock = DockStyle.Fill };
         tabs.TabPages.Add(BuildScanTab());
         tabs.TabPages.Add(BuildWatchTab());
         tabs.TabPages.Add(BuildReportTab());
+        tabs.TabPages.Add(BuildSupportTab());
         tabs.TabPages.Add(BuildRemediationTab());
 
         var split = new SplitContainer
@@ -225,6 +250,23 @@ internal sealed class MainForm : Form
         var runButton = new Button { Text = "Run Scan", AutoSize = true };
         runButton.Click += async (_, _) => await RunScanAsync();
         AddCommandRow(layout, runButton);
+        page.Controls.Add(layout);
+        return page;
+    }
+
+    private TabPage BuildSupportTab()
+    {
+        var page = new TabPage("Support");
+        var layout = CreateTable(8);
+        AddRow(layout, "Report", bundleReportPathBox, OpenFileButton(bundleReportPathBox, "OneLag reports|*.md;*.json|All files|*.*"));
+        AddRow(layout, "Watch directory", bundleWatchDirectoryBox, BrowseFolderButton(bundleWatchDirectoryBox));
+        AddRow(layout, "Bundle output", bundleOutputBox, BrowseFolderButton(bundleOutputBox));
+        AddRow(layout, "Symptom note", bundleNoteBox);
+        AddRow(layout, "OneDrive status", bundleOneDriveStatusBox);
+        AddCommandRow(layout, bundleZipBox, bundleTracePlanBox, bundleOverwriteBox);
+        var bundleButton = new Button { Text = "Create Bundle", AutoSize = true };
+        bundleButton.Click += (_, _) => CreateSupportBundle();
+        AddCommandRow(layout, bundleButton);
         page.Controls.Add(layout);
         return page;
     }
@@ -313,6 +355,7 @@ internal sealed class MainForm : Form
             });
 
             reportPathBox.Text = output;
+            bundleReportPathBox.Text = output;
             Log($"Scan report written: {output}");
         }
         catch (Exception ex)
@@ -362,6 +405,7 @@ internal sealed class MainForm : Form
             var report = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "onelag-watch-report.md");
             var fullPath = watchService.WriteReport(watchDirectoryBox.Text, report);
             reportPathBox.Text = fullPath;
+            bundleReportPathBox.Text = fullPath;
             Log($"Watch report written: {fullPath}");
         }
         catch (Exception ex)
@@ -475,6 +519,43 @@ internal sealed class MainForm : Form
         }
     }
 
+    private void CreateSupportBundle()
+    {
+        try
+        {
+            var reports = new List<string>();
+            if (!string.IsNullOrWhiteSpace(bundleReportPathBox.Text))
+            {
+                reports.Add(bundleReportPathBox.Text);
+            }
+            else if (!string.IsNullOrWhiteSpace(reportPathBox.Text))
+            {
+                reports.Add(reportPathBox.Text);
+            }
+
+            var watchDirectory = string.IsNullOrWhiteSpace(bundleWatchDirectoryBox.Text) ? null : bundleWatchDirectoryBox.Text;
+            var result = new SupportBundleWriter(versionProvider: _ => VersionText()).Write(new SupportBundleOptions(
+                bundleOutputBox.Text,
+                reports,
+                watchDirectory,
+                bundleTracePlanBox.Checked,
+                bundleZipBox.Checked,
+                bundleOverwriteBox.Checked,
+                string.IsNullOrWhiteSpace(bundleNoteBox.Text) ? null : bundleNoteBox.Text,
+                string.IsNullOrWhiteSpace(bundleOneDriveStatusBox.Text) ? null : bundleOneDriveStatusBox.Text));
+
+            Log($"Support bundle written: {result.OutputDirectory}");
+            if (result.ZipPath is not null)
+            {
+                Log($"Support bundle zip: {result.ZipPath}");
+            }
+        }
+        catch (Exception ex)
+        {
+            ShowError(ex);
+        }
+    }
+
     private bool ConfirmMove(string title)
     {
         if (!acknowledgeMoveBox.Checked)
@@ -509,6 +590,49 @@ internal sealed class MainForm : Form
         MessageBox.Show(this, ex.Message, "OneLag", MessageBoxButtons.OK, MessageBoxIcon.Error);
     }
 
+    private void OnUserPreferenceChanged(object sender, UserPreferenceChangedEventArgs e)
+    {
+        ApplySystemTheme();
+    }
+
+    private void ApplySystemTheme()
+    {
+        ApplySystemColors(this);
+        reportList.BackColor = SystemColors.Window;
+        reportList.ForeColor = SystemColors.WindowText;
+        logBox.BackColor = SystemColors.Window;
+        logBox.ForeColor = SystemColors.WindowText;
+    }
+
+    private static void ApplySystemColors(Control control)
+    {
+        if (control is TextBoxBase or ListView)
+        {
+            control.BackColor = SystemColors.Window;
+            control.ForeColor = SystemColors.WindowText;
+        }
+        else
+        {
+            control.BackColor = SystemColors.Control;
+            control.ForeColor = SystemColors.ControlText;
+        }
+
+        foreach (Control child in control.Controls)
+        {
+            ApplySystemColors(child);
+        }
+    }
+
+    private static string VersionText()
+    {
+        var version = typeof(Program).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+            .InformationalVersion
+            ?? typeof(Program).Assembly.GetName().Version?.ToString()
+            ?? "unknown";
+        return $"OneLag {version}";
+    }
+
     private static TableLayoutPanel CreateTable(int rows)
     {
         var table = new TableLayoutPanel
@@ -517,7 +641,8 @@ internal sealed class MainForm : Form
             ColumnCount = 3,
             RowCount = rows,
             Padding = new Padding(12),
-            AutoScroll = true
+            AutoScroll = true,
+            Tag = 0
         };
         table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
         table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -532,7 +657,7 @@ internal sealed class MainForm : Form
 
     private static void AddRow(TableLayoutPanel table, string label, Control control, Control? button = null)
     {
-        var row = table.Controls.Count / 3;
+        var row = NextRow(table);
         table.Controls.Add(new Label { Text = label, AutoSize = true, Anchor = AnchorStyles.Left, Padding = new Padding(0, 6, 0, 0) }, 0, row);
         control.Anchor = AnchorStyles.Left | AnchorStyles.Right;
         table.Controls.Add(control, 1, row);
@@ -544,11 +669,18 @@ internal sealed class MainForm : Form
 
     private static void AddCommandRow(TableLayoutPanel table, params Control[] controls)
     {
-        var row = table.Controls.Count / 3;
+        var row = NextRow(table);
         var panel = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill };
         panel.Controls.AddRange(controls);
         table.Controls.Add(panel, 1, row);
         table.SetColumnSpan(panel, 2);
+    }
+
+    private static int NextRow(TableLayoutPanel table)
+    {
+        var row = table.Tag is int value ? value : 0;
+        table.Tag = row + 1;
+        return row;
     }
 
     private static Button BrowseFolderButton(TextBox target)

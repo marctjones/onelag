@@ -110,6 +110,17 @@ jobs:
           if (($watchViewOutput -join "`n") -notmatch "Kind: Watch") {
             throw "watch view smoke did not identify watch report"
           }
+          $bundle = Join-Path $env:RUNNER_TEMP "onelag-support-bundle-smoke"
+          & $exe support bundle --report $report --report $watchReport --output $bundle --zip
+          if ($LASTEXITCODE -ne 0) {
+            throw "support bundle smoke failed with exit code $LASTEXITCODE"
+          }
+          if (!(Test-Path (Join-Path $bundle "ANALYZE_WITH_CODEX_OR_CLAUDE.md"))) {
+            throw "support bundle smoke did not create analysis prompt"
+          }
+          if (!(Test-Path "$bundle.zip")) {
+            throw "support bundle smoke did not create zip"
+          }
           & $exe repair reset-onedrive
           if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 1) {
             throw "repair dry-run returned unexpected exit code $LASTEXITCODE"
@@ -146,7 +157,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $notes = "OneLag installable preview. Includes self-contained Windows x64 CLI, native Windows tray/GUI, one-shot scan, fuller OneDrive known-issue detection, Windows PDH/process/memory/power performance sampling, Event Viewer summary correlation, WPR/WPA and ProcMon trace-plan generation, offline Codex/Claude-ready support-bundle export, dry-run remediation move-plan generation with rollback/verification scripts, direct move/verify/rollback execution behind explicit confirmation, client-cache health metadata, supported OneDrive reset dry-run/explicit execution, report generation, bounded watch-mode recording, watch episode timeline detection, local report viewing, coverage/smoke-test hardening, Windows validation workflow, and redacted sample reports in source."
+          $notes = "OneLag installable preview. Includes self-contained Windows x64 CLI, native Windows tray/GUI with support-bundle export, one-shot scan, fuller OneDrive known-issue detection, Files On-Demand attribute metadata, Windows PDH/process/memory/power performance sampling, Event Viewer summary correlation across core and selected operational channels, WPR/WPA and ProcMon trace-plan generation, offline Codex/Claude-ready support-bundle export, dry-run remediation move-plan generation with rollback/verification scripts, direct move/verify/rollback execution behind explicit confirmation, client-cache health metadata, supported OneDrive reset dry-run/explicit execution, report generation, bounded watch-mode recording, watch episode timeline detection, local report viewing, coverage/smoke-test hardening, Windows validation workflow, and redacted sample reports in source."
           if ("${{ github.ref_name }}".Contains("-")) {
             gh release create "${{ github.ref_name }}" `
               artifacts/*installer.zip `

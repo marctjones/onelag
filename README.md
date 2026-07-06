@@ -158,12 +158,14 @@ The first implementation target is a .NET Windows console application because th
 - [Architecture](docs/architecture.md)
 - [Implementation plan](docs/implementation-plan.md)
 - [Development best practices](docs/development-best-practices.md)
+- [Release hardening](docs/release-hardening.md)
+- [Windows evidence matrix](docs/windows-evidence-matrix.md)
 - [Roadmap](ROADMAP.md)
 - [Agent instructions](AGENTS.md)
 
 ## Current Status
 
-The repository contains the source PDF, design documentation, development guardrails, live milestones/issues [#1](https://github.com/marctjones/onelag/issues/1)-[#60](https://github.com/marctjones/onelag/issues/60), and an initial .NET implementation.
+The repository contains the source PDF, design documentation, development guardrails, live milestones/issues [#1](https://github.com/marctjones/onelag/issues/1)-[#61](https://github.com/marctjones/onelag/issues/61), and an initial .NET implementation.
 
 Implemented in the current preview:
 
@@ -173,13 +175,14 @@ Implemented in the current preview:
 - OneDrive client-cache health metadata checks that avoid undocumented database parsing, report log/settings/DAT metadata, and offer a Microsoft-supported reset dry run.
 - Windows system-pressure sampling for OneDrive CPU, top-process CPU, memory availability/commit pressure, disk queue/active-time counters, paging-file usage, system-drive free space, and power source when available.
 - Recent Windows Event Viewer summary correlation for critical, error, and warning events when Windows can provide it.
+- Deeper lightweight Windows evidence for Windows Update, Defender, Driver Frameworks, and Files On-Demand attribute metadata when available.
 - WPR/WPA and ProcMon escalation-plan generation for inconclusive responsiveness pressure, without automatically starting heavy tracing.
 - Dry-run remediation move-plan generation with explicit execution flags, rollback script, verification script, and destination-space evidence.
 - `onelag watch` bounded foreground recorder with start, stop, status, mark, and report commands.
 - Watch report episode detection that groups timer-drift samples and manual lag markers into inferred categories.
 - UI-neutral report-view service plus `onelag view` for saved diagnostic and watch report summaries.
 - `onelag support bundle` for offline Codex/Claude Code analysis with copied reports, summaries, manifest, privacy checklist, user notes, environment snapshot, and a ready-to-use prompt.
-- Native Windows Forms tray/GUI with scan, watch, report view, and remediation controls.
+- Native Windows Forms tray/GUI with scan, watch, report view, support-bundle export, and remediation controls.
 - Direct remediation move, verify, and rollback commands behind explicit confirmation flags.
 - Coverage collection, merged coverage summary, and CI artifact upload with initial ratchet gates.
 - Redacted sample diagnostic/watch reports and privacy/support-bundle guidance.

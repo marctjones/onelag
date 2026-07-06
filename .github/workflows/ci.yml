@@ -124,6 +124,17 @@ jobs:
           if (($watchViewOutput -join "`n") -notmatch "Kind: Watch") {
             throw "watch view smoke did not identify watch report"
           }
+          $bundle = Join-Path $env:RUNNER_TEMP "onelag-support-bundle-smoke"
+          & $exe support bundle --report $report --report $watchReport --output $bundle --zip
+          if ($LASTEXITCODE -ne 0) {
+            throw "support bundle smoke failed with exit code $LASTEXITCODE"
+          }
+          if (!(Test-Path (Join-Path $bundle "ANALYZE_WITH_CODEX_OR_CLAUDE.md"))) {
+            throw "support bundle smoke did not create analysis prompt"
+          }
+          if (!(Test-Path "$bundle.zip")) {
+            throw "support bundle smoke did not create zip"
+          }
           & $exe repair reset-onedrive
           if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 1) {
             throw "repair dry-run returned unexpected exit code $LASTEXITCODE"

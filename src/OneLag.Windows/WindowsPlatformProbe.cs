@@ -9,6 +9,19 @@ public sealed class WindowsPlatformProbe : PortablePlatformProbe
     private const long LargeOneDriveLogStoreBytes = 250L * 1024 * 1024;
     private const int MaxEventLogEventsPerChannel = 200;
     private const int EventLogQueryTimeoutMilliseconds = 5_000;
+    private const int MaxFilesOnDemandAttributeSamplesPerRoot = 10_000;
+    private const int FileAttributeRecallOnOpen = 0x00040000;
+    private const int FileAttributePinned = 0x00080000;
+    private const int FileAttributeUnpinned = 0x00100000;
+    private const int FileAttributeRecallOnDataAccess = 0x00400000;
+    private static readonly string[] EventLogChannels =
+    {
+        "System",
+        "Application",
+        "Microsoft-Windows-WindowsUpdateClient/Operational",
+        "Microsoft-Windows-Windows Defender/Operational",
+        "Microsoft-Windows-DriverFrameworks-UserMode/Operational"
+    };
 
     public override TelemetrySnapshot CaptureTelemetry()
     {
@@ -106,6 +119,7 @@ public sealed class WindowsPlatformProbe : PortablePlatformProbe
 
         AddLogStoreSignals(signals);
         AddSettingsStoreSignals(signals);
+        AddFilesOnDemandSignals(roots, signals);
 
         return new OneDriveClientHealthSnapshot(
             DateTimeOffset.UtcNow,
@@ -135,8 +149,10 @@ public sealed class WindowsPlatformProbe : PortablePlatformProbe
 
         var milliseconds = Math.Max(1, (long)window.TotalMilliseconds);
         var summaries = new List<EventLogSummary>();
-        summaries.AddRange(ReadRecentEventSummaries("System", milliseconds));
-        summaries.AddRange(ReadRecentEventSummaries("Application", milliseconds));
+        foreach (var channel in EventLogChannels)
+        {
+            summaries.AddRange(ReadRecentEventSummaries(channel, milliseconds));
+        }
 
         return summaries
             .GroupBy(summary => (summary.LogName, summary.Provider, summary.EventId, summary.Level))
@@ -385,6 +401,107 @@ public sealed class WindowsPlatformProbe : PortablePlatformProbe
         }
     }
 
+    private static void AddFilesOnDemandSignals(IReadOnlyList<RootCandidate> roots, List<ClientHealthSignal> signals)
+    {
+        var sampledRoots = 0;
+        foreach (var root in roots.Take(5))
+        {
+            if (string.IsNullOrWhiteSpace(root.Path) || !Directory.Exists(root.Path))
+            {
+                continue;
+            }
+
+            sampledRoots++;
+            var sample = SampleFilesOnDemandAttributes(root.Path);
+            signals.Add(new ClientHealthSignal(
+                Severity.Info,
+                "files-on-demand-attribute-sample",
+                $"OneDrive root sample {sampledRoots:N0} inspected {sample.SampledEntries:N0} filesystem item(s); offline {sample.OfflineEntries:N0}, pinned {sample.PinnedEntries:N0}, unpinned {sample.UnpinnedEntries:N0}, recall-on-open {sample.RecallOnOpenEntries:N0}, recall-on-data-access {sample.RecallOnDataAccessEntries:N0}, inaccessible {sample.InaccessibleEntries:N0}, capped {sample.WasCapped}.",
+                "Only file attributes were read; file contents were not opened or hydrated."));
+        }
+
+        if (sampledRoots == 0)
+        {
+            signals.Add(new ClientHealthSignal(
+                Severity.Info,
+                "files-on-demand-attribute-sample-unavailable",
+                "No existing OneDrive root was available for Files On-Demand attribute sampling.",
+                "No file contents were opened."));
+        }
+    }
+
+    private static FilesOnDemandAttributeSample SampleFilesOnDemandAttributes(string root)
+    {
+        var sampled = 0;
+        var inaccessible = 0;
+        var offline = 0;
+        var pinned = 0;
+        var unpinned = 0;
+        var recallOnOpen = 0;
+        var recallOnDataAccess = 0;
+        var capped = false;
+
+        try
+        {
+            foreach (var path in Directory.EnumerateFileSystemEntries(root, "*", SearchOption.AllDirectories))
+            {
+                if (sampled >= MaxFilesOnDemandAttributeSamplesPerRoot)
+                {
+                    capped = true;
+                    break;
+                }
+
+                try
+                {
+                    var attributes = (int)File.GetAttributes(path);
+                    sampled++;
+                    if ((attributes & (int)FileAttributes.Offline) != 0)
+                    {
+                        offline++;
+                    }
+
+                    if ((attributes & FileAttributePinned) != 0)
+                    {
+                        pinned++;
+                    }
+
+                    if ((attributes & FileAttributeUnpinned) != 0)
+                    {
+                        unpinned++;
+                    }
+
+                    if ((attributes & FileAttributeRecallOnOpen) != 0)
+                    {
+                        recallOnOpen++;
+                    }
+
+                    if ((attributes & FileAttributeRecallOnDataAccess) != 0)
+                    {
+                        recallOnDataAccess++;
+                    }
+                }
+                catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or DirectoryNotFoundException)
+                {
+                    inaccessible++;
+                }
+            }
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or DirectoryNotFoundException)
+        {
+            inaccessible++;
+        }
+
+        return new FilesOnDemandAttributeSample(
+            sampled,
+            offline,
+            pinned,
+            unpinned,
+            recallOnOpen,
+            recallOnDataAccess,
+            inaccessible,
+            capped);
+    }
+
     private static string? GetOneDriveLogRoot()
     {
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -513,4 +630,14 @@ public sealed class WindowsPlatformProbe : PortablePlatformProbe
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+    private sealed record FilesOnDemandAttributeSample(
+        int SampledEntries,
+        int OfflineEntries,
+        int PinnedEntries,
+        int UnpinnedEntries,
+        int RecallOnOpenEntries,
+        int RecallOnDataAccessEntries,
+        int InaccessibleEntries,
+        bool WasCapped);
 }

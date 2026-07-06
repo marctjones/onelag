@@ -35,6 +35,12 @@ Review the Microsoft-supported OneDrive reset plan without changing anything:
 onelag repair reset-onedrive
 ```
 
+Package reports for offline Codex or Claude Code analysis:
+
+```powershell
+onelag support bundle --report onelag-report.md --report onelag-watch-report.md --output onelag-support-bundle --zip
+```
+
 Execute reset only after reviewing the dry run and confirming your work policy:
 
 ```powershell
