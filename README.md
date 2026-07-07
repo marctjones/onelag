@@ -4,7 +4,7 @@ OneLag is a Windows diagnostic and remediation-planning utility for OneDrive-dri
 
 The working product is a low-impact, one-shot diagnostic CLI first. It identifies local OneDrive roots, measures current OneDrive and whole-system evidence where available, stream-counts high-risk directory clusters without loading huge file lists into memory, and produces a practical report. It does not install a resident background service.
 
-The roadmap also includes an opt-in responsiveness watch mode for recurring keyboard, mouse, and UI freezes. The current preview has a bounded foreground recorder with explicit start/stop controls, lag markers, privacy redaction, ring-buffer retention, and strict resource limits. Tray and GUI surfaces remain roadmap work.
+The roadmap also includes an opt-in responsiveness watch mode for recurring keyboard, mouse, and UI freezes. The current preview has a bounded foreground recorder with explicit start/stop controls, lag markers, privacy redaction, ring-buffer retention, strict resource limits, and native tray/GUI surfaces. All-day and real Windows 11 laptop validation remain open.
 
 ## Install The Windows Preview
 
@@ -139,7 +139,7 @@ We are building a tool that answers these questions on a Windows machine:
 - What safe, reversible commands should the user run next?
 - If the issue happens later, can an opt-in recorder preserve enough evidence around the freeze to explain it?
 
-The first implementation target is a .NET Windows console application because the source guide and Microsoft APIs line up around `System.Diagnostics.PerformanceCounter`, `Process.PriorityClass`, and streaming `System.IO` enumeration. Guided console, tray, and native GUI surfaces can come later after the core scanner and watch services are proven.
+The first implementation target was a .NET Windows console application because the source guide and Microsoft APIs line up around `System.Diagnostics.PerformanceCounter`, `Process.PriorityClass`, and streaming `System.IO` enumeration. The current preview keeps that tested core while adding guided console, tray, and native GUI surfaces on top of shared services.
 
 ## Non-Goals
 
