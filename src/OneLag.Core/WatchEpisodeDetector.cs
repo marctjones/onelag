@@ -58,6 +58,16 @@ public static class WatchEpisodeDetector
                 : ", OneDrive process present";
         }
 
+        if (sample.ShellResponsiveness?.ShellWindowHung == true)
+        {
+            evidence += ", Explorer shell hung";
+        }
+
+        if (sample.HostContext is not null)
+        {
+            evidence += $", config {WatchContextCorrelation.DescribeContext(sample)}";
+        }
+
         var pressure = PressureClassifier.Classify(sample.SystemPressure);
         if (pressure.Evidence.Count > 0)
         {
@@ -67,8 +77,36 @@ public static class WatchEpisodeDetector
         return new WatchEpisode(sample.Timestamp, sample.Timestamp, category, evidence, "medium");
     }
 
+    /// <summary>
+    /// Categories are checked lowest-layer first. A stall caused by a driver holding a CPU at high IRQL
+    /// also shows up as CPU and foreground symptoms, so attributing it to the foreground app would be
+    /// reading the shadow instead of the object.
+    /// </summary>
     private static EpisodeCategory Categorize(WatchSample sample)
     {
+        if (sample.ShellResponsiveness?.ShellWindowHung == true)
+        {
+            return EpisodeCategory.ShellBlocked;
+        }
+
+        var pressure = PressureClassifier.Classify(sample.SystemPressure);
+        var host = sample.HostContext;
+
+        if (pressure.HasInterruptPressure)
+        {
+            if (host is not null && (host.IndirectDisplayCount > 0 || host.ExternalDisplayCount > 0))
+            {
+                return EpisodeCategory.DisplayOrDockSuspected;
+            }
+
+            if (host?.BluetoothRadioEnabled == true && (host.ConnectedBluetoothDevices ?? 0) > 0)
+            {
+                return EpisodeCategory.InputOrBluetoothSuspected;
+            }
+
+            return EpisodeCategory.DriverOrDpcSuspected;
+        }
+
         var onedriveCpu = sample.Telemetry.OneDriveProcesses
             .Where(process => process.CpuPercent.HasValue)
             .Sum(process => process.CpuPercent.GetValueOrDefault());
@@ -77,7 +115,6 @@ public static class WatchEpisodeDetector
             return EpisodeCategory.OneDrivePossible;
         }
 
-        var pressure = PressureClassifier.Classify(sample.SystemPressure);
         if (pressure.HasDiskPressure)
         {
             return EpisodeCategory.StoragePressure;
@@ -141,6 +178,22 @@ public static class WatchEpisodeDetector
         return merged;
     }
 
+    /// <summary>
+    /// When two adjacent episodes merge, the more specific and lower-layer category wins.
+    /// </summary>
+    private static readonly EpisodeCategory[] MergePriority =
+    {
+        EpisodeCategory.DisplayOrDockSuspected,
+        EpisodeCategory.InputOrBluetoothSuspected,
+        EpisodeCategory.DriverOrDpcSuspected,
+        EpisodeCategory.ShellBlocked,
+        EpisodeCategory.OneDrivePossible,
+        EpisodeCategory.StoragePressure,
+        EpisodeCategory.MemoryPaging,
+        EpisodeCategory.CpuStarvation,
+        EpisodeCategory.ForegroundAppBlocked
+    };
+
     private static EpisodeCategory MergeCategory(EpisodeCategory first, EpisodeCategory second)
     {
         if (first == second)
@@ -148,29 +201,12 @@ public static class WatchEpisodeDetector
             return first;
         }
 
-        if (first == EpisodeCategory.OneDrivePossible || second == EpisodeCategory.OneDrivePossible)
+        foreach (var category in MergePriority)
         {
-            return EpisodeCategory.OneDrivePossible;
-        }
-
-        if (first == EpisodeCategory.StoragePressure || second == EpisodeCategory.StoragePressure)
-        {
-            return EpisodeCategory.StoragePressure;
-        }
-
-        if (first == EpisodeCategory.MemoryPaging || second == EpisodeCategory.MemoryPaging)
-        {
-            return EpisodeCategory.MemoryPaging;
-        }
-
-        if (first == EpisodeCategory.CpuStarvation || second == EpisodeCategory.CpuStarvation)
-        {
-            return EpisodeCategory.CpuStarvation;
-        }
-
-        if (first == EpisodeCategory.ForegroundAppBlocked || second == EpisodeCategory.ForegroundAppBlocked)
-        {
-            return EpisodeCategory.ForegroundAppBlocked;
+            if (first == category || second == category)
+            {
+                return category;
+            }
         }
 
         return EpisodeCategory.Unknown;

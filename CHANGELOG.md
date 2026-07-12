@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Differential redesign
+
+OneDrive is no longer the only hypothesis the tool can hold. See [differential design](docs/differential-design.md).
+
+- Added `HypothesisEngine`, which ranks ten candidate causes of desktop lag against the same evidence and records what argues for and against each one, with a specific next step per cause.
+- Added a live-evidence gate: static folder shape (item count, high-churn directories, sync blockers) can no longer promote OneDrive past `possible`. Reaching `likely` requires a live signal. This fixes reports that reached `OneDrivePossible` on `desktop.ini` hits alone, with no live telemetry.
+- Added `EvidenceQualityAssessor`, which grades every capture `Complete`, `Partial`, or `Insufficient`, lists exactly what was missing, and states it above the verdict instead of in a footnote.
+- Added DPC and interrupt counters, including per-core maximums read across every processor instance, so a driver storm pinning a single core is not averaged away by the `_Total` instance.
+- Added `HostContext`: display topology via `QueryDisplayConfig` (including DisplayLink-class indirect/USB displays), Bluetooth radio and connected-device state, power source, wired-network state, and a derived dock state.
+- Added `ShellResponsiveness`, which measures Explorer message-pump latency directly instead of inferring shell blocking from folder shape.
+- Added `WatchContextCorrelation`, which reports lag episodes per hour grouped by hardware configuration, so lag that tracks the dock, the external displays, or the Bluetooth radio is visible as such.
+- Added `DisplayOrDockSuspected`, `InputOrBluetoothSuspected`, and `ShellBlocked` watch-episode categories, and reordered categorization so a kernel-level stall is not attributed to the foreground app it happens to be starving.
+- Sync-restriction findings and rename guidance now surface as sync hygiene regardless of the lag diagnosis, rather than being gated behind an OneDrive verdict they should never have driven.
+
+### Fixed
+
+- Watch-mode timer drift was measured against a running schedule, so the samplers' own cost (PDH and process sampling each hold a window open) was folded into drift and accumulated. Every sample after the first read as a lag episode with an ever-growing stall, which would have made an all-day watch session produce nothing but false positives. Drift now measures the overshoot of each individual sleep.
+- PDH counter values were accepted only when `CStatus` equalled zero. `CStatus` is severity-coded, and rate counters — which is every counter OneLag samples — are documented to return `PDH_CSTATUS_NEW_DATA` (1) when the raw value advanced between collections. The equality test discarded exactly the samples that carried data. Success is now tested by severity.
+- Laptop panels that report `DISPLAYPORT_EMBEDDED` or `LVDS` rather than `INTERNAL` were counted as external displays, which would report an undocked laptop as docked.
+- Connected Bluetooth devices are now reported as unknown rather than zero when no classic devices are found, because `BluetoothFindFirstDevice` cannot enumerate Bluetooth LE devices and most modern mice and keyboards are LE. A confident zero would have wrongly weakened the Bluetooth hypothesis.
+
 - Added GUI support-bundle export for offline Codex or Claude Code analysis.
 - Added Files On-Demand attribute metadata sampling for OneDrive roots without opening file contents.
 - Expanded read-only Windows event summary coverage to selected operational channels for Windows Update, Defender, and Driver Frameworks.

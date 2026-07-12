@@ -126,8 +126,21 @@ Windows validation details are documented in [Windows 11 validation](docs/window
 
 ## What We Are Working On
 
+OneLag is a lag differential tool. OneDrive is one hypothesis among ten, not the default. Every capture ranks
+all candidate causes against the same evidence, records what argues for and against each, and states how much
+of the evidence it could actually collect before it states a verdict. See
+[differential design](docs/differential-design.md) for why.
+
+The ranked causes are OneDrive sync, driver interrupt/DPC latency, the display and dock pipeline, the
+Bluetooth and input radio, storage saturation, CPU contention, memory paging, Explorer shell blocking,
+Defender/Search/Update scanners, and thermal or power throttling.
+
 We are building a tool that answers these questions on a Windows machine:
 
+- Which of the candidate causes does the evidence actually support, and which does it argue against?
+- Is a kernel driver holding a CPU at high IRQL long enough to stall the desktop and the cursor?
+- Does the lag track the dock, the external displays, or the Bluetooth radio rather than sync load?
+- Is Explorer genuinely blocked, measured rather than inferred?
 - Is OneDrive plausibly responsible for the current lag or Explorer unresponsiveness?
 - Is the evidence strong enough to say `OneDrive likely`, or is broader non-OneDrive system pressure more likely?
 - Are synced folders over the practical item-count limits documented by Microsoft?
@@ -154,6 +167,7 @@ The first implementation target was a .NET Windows console application because t
 ## Documentation
 
 - [Problem statement](docs/problem-statement.md)
+- [Differential design](docs/differential-design.md)
 - [Research validation](docs/research-validation.md)
 - [Architecture](docs/architecture.md)
 - [Implementation plan](docs/implementation-plan.md)
@@ -170,6 +184,12 @@ The repository contains the source PDF, design documentation, development guardr
 Implemented in the current preview:
 
 - .NET solution split into core, Windows platform probe, CLI, and tests.
+- Ranked differential across ten candidate causes, with supporting and opposing evidence and a specific next step for each, plus a live-evidence gate that stops static folder shape from implicating OneDrive on its own.
+- Evidence-quality grading (`Complete`, `Partial`, `Insufficient`) stated above the verdict, so a capture with no live evidence says so instead of reading as authoritative.
+- DPC and interrupt sampling including per-core maximums, so a driver storm pinning one core is not averaged away.
+- Host-context sampling: display topology including DisplayLink-class indirect/USB displays, Bluetooth radio and connected devices, power source, and derived dock state.
+- Direct Explorer message-pump probing, so shell blocking is measured rather than inferred.
+- Watch-mode configuration correlation, reporting lag episodes per hour grouped by hardware configuration.
 - `onelag scan` with streaming inventory, high-risk directory detection, static sync-blocker detection, redacted Markdown/JSON reports, and conservative differential diagnosis.
 - Fuller OneDrive known-issue detection for invalid characters, leading/trailing spaces, blocked names, reserved device names, root `forms`, path-length limits, duplicate names, network/reparse sync roots, temporary files, PST/OST files, OneNote notebook files, preview-size limits, and large files.
 - OneDrive client-cache health metadata checks that avoid undocumented database parsing, report log/settings/DAT metadata, and offer a Microsoft-supported reset dry run.
@@ -192,6 +212,8 @@ Implemented in the current preview:
 
 Still roadmap work:
 
+- Real Windows 11 validation of the DPC, display-topology, Bluetooth, and shell probes. All of the new Windows code degrades to an explicit `unavailable` evidence state rather than failing, but none of it has been observed against real hardware yet.
+- Naming the offending driver. OneLag can now say a driver is stalling the machine and that the lag tracks the dock; saying which `.sys` file still requires an ETW trace.
 - Signed MSI/EXE installer.
 - Deeper Windows-only validation for Files On-Demand states, WPR/WPA, and ProcMon escalation runbooks.
 - Real Windows 11 laptop validation run on a self-hosted runner.

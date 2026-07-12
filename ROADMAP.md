@@ -101,6 +101,20 @@ Tracker: [v0.8 milestone](https://github.com/marctjones/onelag/milestone/8), iss
 - Add GUI support-bundle export and system-color/DPI-friendly layout behavior.
 - Package CLI, GUI, and tray artifacts with explicit startup opt-in.
 
+## v0.9 - Differential Redesign
+
+Design record: [differential design](docs/differential-design.md).
+
+- Rank ten candidate causes of lag against the same evidence, with supporting and opposing evidence and a next step for each.
+- Gate OneDrive on live evidence so static folder shape cannot implicate it on its own.
+- Grade and state evidence quality before any verdict.
+- Sample DPC and interrupt time, including per-core maximums.
+- Sample host context: display topology, indirect/USB displays, Bluetooth, power, and dock state.
+- Probe Explorer shell responsiveness directly.
+- Correlate watch episodes with the hardware configuration they happened in.
+- Validate the new Windows probes on a real Windows 11 laptop, docked and undocked.
+- Attribute DPC time to a specific driver image via a bounded ETW session.
+
 ## Later
 
 - Optional Microsoft 365 admin sync report integration.

@@ -1,8 +1,17 @@
 namespace OneLag.Core;
 
+public sealed record RiskAnalysis(
+    DifferentialDiagnosis Diagnosis,
+    IReadOnlyList<Finding> Findings,
+    IReadOnlyList<Recommendation> Recommendations,
+    IReadOnlyList<Hypothesis> Hypotheses,
+    EvidenceQuality EvidenceQuality);
+
 public sealed class RiskEngine
 {
-    public (DifferentialDiagnosis Diagnosis, IReadOnlyList<Finding> Findings, IReadOnlyList<Recommendation> Recommendations) Analyze(
+    private readonly HypothesisEngine hypothesisEngine = new();
+
+    public RiskAnalysis Analyze(
         IReadOnlyList<InventorySummary> inventories,
         TelemetrySnapshot telemetry,
         SystemPressureSnapshot pressure,
@@ -11,12 +20,14 @@ public sealed class RiskEngine
         return Analyze(inventories, telemetry, pressure, clientHealth, Array.Empty<EventLogSummary>());
     }
 
-    public (DifferentialDiagnosis Diagnosis, IReadOnlyList<Finding> Findings, IReadOnlyList<Recommendation> Recommendations) Analyze(
+    public RiskAnalysis Analyze(
         IReadOnlyList<InventorySummary> inventories,
         TelemetrySnapshot telemetry,
         SystemPressureSnapshot pressure,
         OneDriveClientHealthSnapshot clientHealth,
-        IReadOnlyList<EventLogSummary> eventLogs)
+        IReadOnlyList<EventLogSummary> eventLogs,
+        HostContext? hostContext = null,
+        ShellResponsiveness? shell = null)
     {
         var findings = new List<Finding>();
         var recommendations = new List<Recommendation>();
@@ -27,7 +38,6 @@ public sealed class RiskEngine
             .SelectMany(inventory => inventory.SyncBlockers)
             .Where(blocker => blocker.Severity is Severity.Emergency or Severity.HighRisk or Severity.Warning)
             .ToArray();
-        var highRiskBlockers = significantBlockers.Length;
         var emergencyBlockers = significantBlockers.Count(blocker => blocker.Severity == Severity.Emergency);
         var capped = inventories.Any(inventory => inventory.WasCapped);
         var onedriveRunning = telemetry.OneDriveProcesses.Count > 0;
@@ -41,6 +51,26 @@ public sealed class RiskEngine
             .Where(summary => summary.Level is "Critical" or "Error" or "Warning")
             .ToArray();
         var pressureClassification = PressureClassifier.Classify(pressure);
+
+        var evidenceQuality = EvidenceQualityAssessor.Assess(telemetry, pressure, eventLogs, hostContext, shell);
+        var hypotheses = hypothesisEngine.Rank(new HypothesisInputs(
+            inventories,
+            telemetry,
+            pressure,
+            clientHealth,
+            eventLogs,
+            hostContext,
+            shell,
+            evidenceQuality));
+
+        if (evidenceQuality.Grade == EvidenceGrade.Insufficient)
+        {
+            findings.Add(new Finding(
+                Severity.Warning,
+                "This capture contains too little live evidence to diagnose anything",
+                $"Evidence quality scored {evidenceQuality.Score}/100 with {evidenceQuality.Gaps.Count:N0} gap(s). See the Evidence Quality section for what was missing.",
+                "high"));
+        }
 
         if (totalItems >= 1_000_000)
         {
@@ -78,7 +108,7 @@ public sealed class RiskEngine
                 "high"));
         }
 
-        if (highRiskBlockers > 0)
+        if (significantBlockers.Length > 0)
         {
             var topKinds = string.Join(", ", significantBlockers
                 .GroupBy(blocker => blocker.Kind)
@@ -90,7 +120,7 @@ public sealed class RiskEngine
             findings.Add(new Finding(
                 emergencyBlockers > 0 ? Severity.Emergency : Severity.Warning,
                 "Known OneDrive restriction issues were found",
-                $"{highRiskBlockers:N0} known restriction issue(s) were detected. Top kinds: {topKinds}.",
+                $"{significantBlockers.Length:N0} known restriction issue(s) were detected. Top kinds: {topKinds}. Restriction issues describe sync hygiene, not system lag, and on their own do not implicate OneDrive in a freeze.",
                 "medium"));
         }
 
@@ -112,6 +142,14 @@ public sealed class RiskEngine
                     ? $"{telemetry.OneDriveProcesses.Count:N0} OneDrive process instance(s) were observed using about {onedriveCpuPercent:N1}% CPU across sampled processes."
                     : $"{telemetry.OneDriveProcesses.Count:N0} OneDrive process instance(s) were observed.",
                 "medium"));
+        }
+        else
+        {
+            findings.Add(new Finding(
+                Severity.Warning,
+                "OneDrive was not running, so the OneDrive hypothesis could not be tested",
+                "No OneDrive process was present at capture time. Any OneDrive verdict from this capture rests on folder shape alone, which describes exposure rather than an active cause.",
+                "high"));
         }
 
         if (onedriveCpuPercent >= 15)
@@ -137,12 +175,39 @@ public sealed class RiskEngine
                 "medium"));
         }
 
+        if (pressureClassification.HasInterruptPressure)
+        {
+            findings.Add(new Finding(
+                Severity.HighRisk,
+                "Kernel interrupt or DPC latency is elevated",
+                "A driver is holding CPU time at high IRQL. This starves the whole desktop, including the mouse cursor, and cannot be caused by OneDrive's user-mode sync engine.",
+                "high"));
+        }
+
         if (pressureClassification.HasAnyPressure)
         {
             findings.Add(new Finding(
                 Severity.Warning,
                 "Whole-system performance pressure was observed",
                 string.Join("; ", pressureClassification.Evidence),
+                "medium"));
+        }
+
+        if (shell?.ShellWindowHung == true)
+        {
+            findings.Add(new Finding(
+                Severity.HighRisk,
+                "The Explorer shell was not pumping messages",
+                $"Windows reported the shell window as hung{(shell.ShellPumpLatencyMilliseconds.HasValue ? $", and it took {shell.ShellPumpLatencyMilliseconds:N0} ms to answer a null message" : string.Empty)}. This measures the shell-blocking failure mode directly rather than inferring it from folder shape.",
+                "high"));
+        }
+
+        if (hostContext is not null && hostContext.IndirectDisplayCount > 0)
+        {
+            findings.Add(new Finding(
+                Severity.Warning,
+                "An indirect/USB display driver is rendering a display",
+                $"{hostContext.IndirectDisplayCount:N0} display(s) run through an indirect display driver (DisplayLink-class USB graphics). These render frames on the CPU and push them over USB, and are a common source of long DPC routines and desktop stutter.",
                 "medium"));
         }
 
@@ -161,79 +226,24 @@ public sealed class RiskEngine
                 "medium"));
         }
 
-        var hasStaticOneDriveRisk = totalItems >= 200_000 || highRiskDirectories > 0 || highRiskBlockers > 0 || capped;
-        var hasLiveOneDriveRisk = (onedriveRunning && logChurn >= 5) || onedriveCpuPercent >= 15 || resetWorthConsidering;
-        var hasRecentWindowsEventRisk = recentWindowsEvents.Length > 0;
-
-        var diagnosis = (hasStaticOneDriveRisk, hasLiveOneDriveRisk) switch
-        {
-            (true, true) => DifferentialDiagnosis.OneDriveLikely,
-            (true, false) => DifferentialDiagnosis.OneDrivePossible,
-            (false, true) => DifferentialDiagnosis.OneDrivePossible,
-            _ when hasRecentWindowsEventRisk || pressureClassification.HasAnyPressure => DifferentialDiagnosis.NonOneDrivePressureSuspected,
-            _ when pressure.EvidenceState.Contains("pressure", StringComparison.OrdinalIgnoreCase) => DifferentialDiagnosis.NonOneDrivePressureSuspected,
-            _ => DifferentialDiagnosis.OneDriveNotProven
-        };
+        var diagnosis = DeriveDiagnosis(hypotheses, pressureClassification, recentWindowsEvents.Length > 0);
 
         recommendations.Add(new Recommendation(
             RecommendationKind.Observe,
             "Review the evidence before changing files",
-            "The report separates direct observations from inferred causes.",
+            "The report separates direct observations from inferred causes, and ranks every candidate cause with the evidence for and against it.",
             "No data is modified by the scan."));
 
-        if (diagnosis is DifferentialDiagnosis.OneDriveLikely or DifferentialDiagnosis.OneDrivePossible)
+        if (evidenceQuality.Grade == EvidenceGrade.Insufficient)
         {
             recommendations.Add(new Recommendation(
-                RecommendationKind.PauseSync,
-                "Pause OneDrive before moving or reorganizing risky folders",
-                "Pausing sync reduces contention while you inspect or move high-churn folders.",
-                "Use the official OneDrive tray menu; OneLag does not pause sync automatically."));
-
-            if (highRiskDirectories > 0)
-            {
-                recommendations.Add(new Recommendation(
-                    RecommendationKind.MoveOutOfOneDrive,
-                    "Move development and build-output folders out of OneDrive",
-                    "Dependency caches, build outputs, virtual environments, and source-control metadata create many small changes.",
-                    "Generate and inspect a dry-run move plan before executing anything."));
-            }
-
-            if (significantBlockers.Any(blocker => blocker.Kind is "invalid-character" or "reserved-name" or "blocked-name" or "leading-or-trailing-space" or "root-forms-name" or "long-segment" or "long-onedrive-relative-path" or "long-local-sync-path" or "windows-explorer-path-limit" or "duplicate-filename" or "office-folder-semicolon" or "invalid-leading-folder-character"))
-            {
-                recommendations.Add(new Recommendation(
-                    RecommendationKind.SelectiveSync,
-                    "Rename or shorten items that violate OneDrive restrictions",
-                    "Unsupported characters, blocked names, trailing spaces, reserved device names, and over-limit paths can keep sync stuck or processing changes.",
-                    "Rename manually or with a reviewed dry-run script; do not bulk rename without a backup."));
-            }
-
-            if (significantBlockers.Any(blocker => blocker.Kind is "mail-data-file" or "onenote-notebook-file"))
-            {
-                recommendations.Add(new Recommendation(
-                    RecommendationKind.MoveOutOfOneDrive,
-                    "Move Outlook and OneNote data through supported app workflows",
-                    "PST/OST and existing OneNote notebook files have special OneDrive behavior and can create misleading sync or lag symptoms.",
-                    "Use Outlook or OneNote supported move/export steps instead of dragging live data files."));
-            }
-
-            if (significantBlockers.Any(blocker => blocker.Kind == "file-too-large-for-sync"))
-            {
-                recommendations.Add(new Recommendation(
-                    RecommendationKind.MoveOutOfOneDrive,
-                    "Move files that exceed OneDrive sync limits",
-                    "Individual files over OneDrive's supported file-size limit cannot sync reliably.",
-                    "Move or split over-limit files only after confirming backup and storage state."));
-            }
-
-            if (significantBlockers.Any(blocker => blocker.Kind is "network-sync-location" or "root-reparse-point" or "reparse-point"))
-            {
-                recommendations.Add(new Recommendation(
-                    RecommendationKind.ReviewUnsupportedConfiguration,
-                    "Review unsupported sync-root or junction configuration",
-                    "OneDrive does not support syncing through network locations, symbolic links, or junction points.",
-                    "Unlink/relink or move data only after confirming the real local path and backup state."));
-            }
+                RecommendationKind.Observe,
+                "Capture evidence while the machine is actually lagging",
+                "A snapshot taken during a calm moment cannot explain an episodic freeze. The lag has to be observed while it is happening to be diagnosed.",
+                "Run `onelag watch start --duration 8h` and press the lag marker when a freeze happens. No files are modified."));
         }
+
+        AddOneDriveRecommendations(diagnosis, hypotheses, highRiskDirectories, significantBlockers, recommendations);
 
         if (resetWorthConsidering)
         {
@@ -244,16 +254,32 @@ public sealed class RiskEngine
                 "Run `onelag repair reset-onedrive` first to review the dry-run plan. Execute only after confirming sync status and work policy."));
         }
 
+        // Every non-OneDrive hypothesis that reaches Possible or better contributes its own next step, so a
+        // non-OneDrive cause produces an actionable recommendation rather than a shrug toward WPR.
+        foreach (var hypothesis in hypotheses.Where(candidate => candidate.Verdict is HypothesisVerdict.Possible or HypothesisVerdict.Likely or HypothesisVerdict.StronglySupported))
+        {
+            if (hypothesis.Kind == HypothesisKind.OneDriveSync)
+            {
+                continue;
+            }
+
+            recommendations.Add(new Recommendation(
+                MapRecommendationKind(hypothesis.Kind),
+                $"{Describe(hypothesis.Kind)} is {Describe(hypothesis.Verdict)}",
+                hypothesis.Supporting.Count > 0 ? string.Join(" ", hypothesis.Supporting) : hypothesis.Summary,
+                hypothesis.NextStep));
+        }
+
         if (pressureClassification.HasAnyPressure)
         {
             recommendations.Add(new Recommendation(
                 RecommendationKind.EscalateToProcmonOrWpr,
                 "Correlate system pressure before changing OneDrive data",
-                "CPU, memory, or disk pressure can make the laptop unresponsive even when OneDrive inventory risk is low.",
+                "CPU, memory, disk, or interrupt pressure can make the laptop unresponsive even when OneDrive inventory risk is low.",
                 "Use the pressure evidence to decide whether WPR/WPA, Resource Monitor, or vendor driver/storage review is the next step."));
         }
 
-        if (hasRecentWindowsEventRisk)
+        if (recentWindowsEvents.Length > 0)
         {
             recommendations.Add(new Recommendation(
                 RecommendationKind.EscalateToEventViewer,
@@ -271,6 +297,164 @@ public sealed class RiskEngine
                 "Do not upload traces without reviewing privacy impact."));
         }
 
-        return (diagnosis, findings, recommendations);
+        return new RiskAnalysis(diagnosis, findings, recommendations, hypotheses, evidenceQuality);
+    }
+
+    /// <summary>
+    /// The OneDrive-shaped verdict, now derived from the ranked hypotheses rather than computed on its own.
+    /// It survives so existing reports, views, and support bundles keep working, but the hypothesis table is
+    /// the real output. Critically, OneDrive can no longer be promoted on static folder shape alone.
+    /// </summary>
+    private static DifferentialDiagnosis DeriveDiagnosis(
+        IReadOnlyList<Hypothesis> hypotheses,
+        PressureClassification pressure,
+        bool hasRecentWindowsEvents)
+    {
+        var oneDrive = hypotheses.First(hypothesis => hypothesis.Kind == HypothesisKind.OneDriveSync);
+        var topOther = hypotheses
+            .Where(hypothesis => hypothesis.Kind != HypothesisKind.OneDriveSync)
+            .MaxBy(hypothesis => hypothesis.Score);
+
+        if (oneDrive.Verdict == HypothesisVerdict.StronglySupported)
+        {
+            return DifferentialDiagnosis.OneDriveLikely;
+        }
+
+        // Another cause outscoring OneDrive is the case the old engine had no way to express.
+        if (topOther is not null && topOther.Score > oneDrive.Score && topOther.Score >= 20)
+        {
+            return DifferentialDiagnosis.NonOneDrivePressureSuspected;
+        }
+
+        if (oneDrive.Verdict == HypothesisVerdict.Likely)
+        {
+            return DifferentialDiagnosis.OneDriveLikely;
+        }
+
+        if (oneDrive.Verdict == HypothesisVerdict.Possible)
+        {
+            return DifferentialDiagnosis.OneDrivePossible;
+        }
+
+        if (pressure.HasAnyPressure || hasRecentWindowsEvents)
+        {
+            return DifferentialDiagnosis.NonOneDrivePressureSuspected;
+        }
+
+        return DifferentialDiagnosis.OneDriveNotProven;
+    }
+
+    private static void AddOneDriveRecommendations(
+        DifferentialDiagnosis diagnosis,
+        IReadOnlyList<Hypothesis> hypotheses,
+        int highRiskDirectories,
+        IReadOnlyList<SyncBlocker> significantBlockers,
+        List<Recommendation> recommendations)
+    {
+        var oneDrive = hypotheses.First(hypothesis => hypothesis.Kind == HypothesisKind.OneDriveSync);
+        var oneDriveInPlay = diagnosis is DifferentialDiagnosis.OneDriveLikely or DifferentialDiagnosis.OneDrivePossible
+            || oneDrive.Verdict is HypothesisVerdict.Possible or HypothesisVerdict.Likely or HypothesisVerdict.StronglySupported;
+
+        // Pausing sync is a lag mitigation, so it only makes sense when OneDrive is actually implicated in
+        // the lag. Everything below it is documented sync-configuration hygiene that stays worth doing even
+        // when the lag turns out to be a driver problem, so it is not gated on the diagnosis.
+        if (oneDriveInPlay)
+        {
+            recommendations.Add(new Recommendation(
+                RecommendationKind.PauseSync,
+                "Pause OneDrive before moving or reorganizing risky folders",
+                "Pausing sync reduces contention while you inspect or move high-churn folders.",
+                "Use the official OneDrive tray menu; OneLag does not pause sync automatically."));
+        }
+
+        if (highRiskDirectories > 0)
+        {
+            recommendations.Add(new Recommendation(
+                RecommendationKind.MoveOutOfOneDrive,
+                "Move development and build-output folders out of OneDrive",
+                "Dependency caches, build outputs, virtual environments, and source-control metadata create many small changes. This is a documented anti-pattern regardless of what is causing the current lag.",
+                "Generate and inspect a dry-run move plan before executing anything."));
+        }
+
+        if (significantBlockers.Any(blocker => blocker.Kind is "invalid-character" or "reserved-name" or "blocked-name" or "leading-or-trailing-space" or "root-forms-name" or "long-segment" or "long-onedrive-relative-path" or "long-local-sync-path" or "windows-explorer-path-limit" or "duplicate-filename" or "office-folder-semicolon" or "invalid-leading-folder-character"))
+        {
+            recommendations.Add(new Recommendation(
+                RecommendationKind.SelectiveSync,
+                "Rename or shorten items that violate OneDrive restrictions",
+                "Unsupported characters, blocked names, trailing spaces, reserved device names, and over-limit paths can keep sync stuck or processing changes.",
+                "Rename manually or with a reviewed dry-run script; do not bulk rename without a backup."));
+        }
+
+        if (significantBlockers.Any(blocker => blocker.Kind is "mail-data-file" or "onenote-notebook-file"))
+        {
+            recommendations.Add(new Recommendation(
+                RecommendationKind.MoveOutOfOneDrive,
+                "Move Outlook and OneNote data through supported app workflows",
+                "PST/OST and existing OneNote notebook files have special OneDrive behavior and can create misleading sync or lag symptoms.",
+                "Use Outlook or OneNote supported move/export steps instead of dragging live data files."));
+        }
+
+        if (significantBlockers.Any(blocker => blocker.Kind == "file-too-large-for-sync"))
+        {
+            recommendations.Add(new Recommendation(
+                RecommendationKind.MoveOutOfOneDrive,
+                "Move files that exceed OneDrive sync limits",
+                "Individual files over OneDrive's supported file-size limit cannot sync reliably.",
+                "Move or split over-limit files only after confirming backup and storage state."));
+        }
+
+        if (significantBlockers.Any(blocker => blocker.Kind is "network-sync-location" or "root-reparse-point" or "reparse-point"))
+        {
+            recommendations.Add(new Recommendation(
+                RecommendationKind.ReviewUnsupportedConfiguration,
+                "Review unsupported sync-root or junction configuration",
+                "OneDrive does not support syncing through network locations, symbolic links, or junction points.",
+                "Unlink/relink or move data only after confirming the real local path and backup state."));
+        }
+    }
+
+    private static RecommendationKind MapRecommendationKind(HypothesisKind kind)
+    {
+        return kind switch
+        {
+            HypothesisKind.DisplayOrDockPipeline => RecommendationKind.ReviewUnsupportedConfiguration,
+            HypothesisKind.BluetoothOrInputRadio => RecommendationKind.ReviewUnsupportedConfiguration,
+            HypothesisKind.ShellExtensionBlocking => RecommendationKind.ReviewUnsupportedConfiguration,
+            HypothesisKind.SecurityOrSearchScanner => RecommendationKind.EscalateToEventViewer,
+            HypothesisKind.ThermalOrPowerThrottling => RecommendationKind.EscalateToEventViewer,
+            HypothesisKind.MemoryPaging => RecommendationKind.FreeUpSpace,
+            _ => RecommendationKind.EscalateToProcmonOrWpr
+        };
+    }
+
+    private static string Describe(HypothesisKind kind)
+    {
+        return kind switch
+        {
+            HypothesisKind.OneDriveSync => "OneDrive sync",
+            HypothesisKind.StorageSaturation => "Storage saturation",
+            HypothesisKind.CpuContention => "CPU contention",
+            HypothesisKind.MemoryPaging => "Memory paging",
+            HypothesisKind.DriverInterruptLatency => "Driver interrupt/DPC latency",
+            HypothesisKind.DisplayOrDockPipeline => "Display or dock pipeline",
+            HypothesisKind.BluetoothOrInputRadio => "Bluetooth or input radio",
+            HypothesisKind.ShellExtensionBlocking => "Explorer shell blocking",
+            HypothesisKind.SecurityOrSearchScanner => "Defender, Search, or Update scanner",
+            HypothesisKind.ThermalOrPowerThrottling => "Thermal or power throttling",
+            _ => kind.ToString()
+        };
+    }
+
+    private static string Describe(HypothesisVerdict verdict)
+    {
+        return verdict switch
+        {
+            HypothesisVerdict.StronglySupported => "strongly supported",
+            HypothesisVerdict.Likely => "likely",
+            HypothesisVerdict.Possible => "possible",
+            HypothesisVerdict.NotSupported => "not supported",
+            HypothesisVerdict.RuledOut => "ruled out",
+            _ => "untested"
+        };
     }
 }

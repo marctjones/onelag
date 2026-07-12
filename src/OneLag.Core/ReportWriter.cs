@@ -34,6 +34,11 @@ public static class ReportWriter
         builder.AppendLine($"- OneDrive client health: `{report.OneDriveClientHealth.EvidenceState}`");
         builder.AppendLine();
 
+        AppendEvidenceQuality(builder, report.EvidenceQuality);
+        AppendHypotheses(builder, report.Hypotheses);
+        AppendHostContext(builder, report.HostContext, redactor);
+        AppendShellResponsiveness(builder, report.ShellResponsiveness);
+
         builder.AppendLine("## Roots");
         foreach (var root in report.Roots)
         {
@@ -161,6 +166,143 @@ public static class ReportWriter
         }
 
         return builder.ToString();
+    }
+
+    private static void AppendEvidenceQuality(StringBuilder builder, EvidenceQuality? quality)
+    {
+        if (quality is null)
+        {
+            return;
+        }
+
+        builder.AppendLine("## Evidence Quality");
+        builder.AppendLine();
+        builder.AppendLine($"**{quality.Grade} ({quality.Score}/100).** {quality.Summary}");
+
+        if (quality.Gaps.Count > 0)
+        {
+            builder.AppendLine();
+            builder.AppendLine("Gaps in this capture:");
+            foreach (var gap in quality.Gaps)
+            {
+                builder.AppendLine($"- {gap}");
+            }
+        }
+
+        builder.AppendLine();
+    }
+
+    private static void AppendHypotheses(StringBuilder builder, IReadOnlyList<Hypothesis>? hypotheses)
+    {
+        if (hypotheses is null || hypotheses.Count == 0)
+        {
+            return;
+        }
+
+        builder.AppendLine("## Ranked Causes");
+        builder.AppendLine();
+        builder.AppendLine("| Cause | Verdict | Score |");
+        builder.AppendLine("| --- | --- | --- |");
+        foreach (var hypothesis in hypotheses)
+        {
+            builder.AppendLine($"| {hypothesis.Kind} | {hypothesis.Verdict} | {hypothesis.Score} |");
+        }
+
+        builder.AppendLine();
+
+        // OneDrive always gets a written-out section even when it is rejected. It is the hypothesis the user
+        // came in believing, so the reasons against it are the most important thing on the page.
+        foreach (var hypothesis in hypotheses.Where(candidate =>
+            candidate.Verdict is not HypothesisVerdict.NotSupported
+            || candidate.Kind == HypothesisKind.OneDriveSync))
+        {
+            builder.AppendLine($"### {hypothesis.Kind} - {hypothesis.Verdict}");
+            builder.AppendLine();
+            builder.AppendLine(hypothesis.Summary);
+            builder.AppendLine();
+
+            if (hypothesis.Supporting.Count > 0)
+            {
+                builder.AppendLine("Evidence for:");
+                foreach (var item in hypothesis.Supporting)
+                {
+                    builder.AppendLine($"- {item}");
+                }
+
+                builder.AppendLine();
+            }
+
+            if (hypothesis.Opposing.Count > 0)
+            {
+                builder.AppendLine("Evidence against:");
+                foreach (var item in hypothesis.Opposing)
+                {
+                    builder.AppendLine($"- {item}");
+                }
+
+                builder.AppendLine();
+            }
+
+            builder.AppendLine($"Next step: {hypothesis.NextStep}");
+            builder.AppendLine();
+        }
+    }
+
+    private static void AppendHostContext(StringBuilder builder, HostContext? host, Redactor redactor)
+    {
+        if (host is null)
+        {
+            return;
+        }
+
+        builder.AppendLine("## Host Context");
+        builder.AppendLine();
+        builder.AppendLine($"- Dock state: `{host.DockState}`");
+        builder.AppendLine($"- Displays: `{host.DisplayCount:N0}` total, `{host.ExternalDisplayCount:N0}` external, `{host.IndirectDisplayCount:N0}` indirect/USB");
+        builder.AppendLine($"- Bluetooth radio: present `{FormatBool(host.BluetoothRadioPresent)}`, enabled `{FormatBool(host.BluetoothRadioEnabled)}`, connected devices `{FormatCount(host.ConnectedBluetoothDevices)}`");
+        builder.AppendLine($"- Power: `{host.PowerSource}`");
+        builder.AppendLine($"- Wired network up: `{FormatBool(host.WiredNetworkUp)}`");
+        builder.AppendLine($"- Evidence: `{host.EvidenceState}`");
+
+        foreach (var display in host.Displays)
+        {
+            var kind = display.IsInternal ? "internal" : display.IsIndirect ? "indirect/USB" : "external";
+            builder.AppendLine($"- Display `{redactor.PathValue(display.Name)}`: {kind}, `{display.OutputTechnology}`, `{display.Width}x{display.Height}` at `{display.RefreshHz:N0} Hz`");
+        }
+
+        foreach (var driver in host.IndirectDisplayDrivers)
+        {
+            builder.AppendLine($"- Indirect display software running: `{driver}`");
+        }
+
+        builder.AppendLine();
+    }
+
+    private static void AppendShellResponsiveness(StringBuilder builder, ShellResponsiveness? shell)
+    {
+        if (shell is null)
+        {
+            return;
+        }
+
+        builder.AppendLine("## Explorer Shell Responsiveness");
+        builder.AppendLine();
+        builder.AppendLine($"- Explorer running: `{FormatBool(shell.ExplorerRunning)}`");
+        builder.AppendLine($"- Shell window hung: `{FormatBool(shell.ShellWindowHung)}`");
+        builder.AppendLine($"- Shell message-pump latency: `{(shell.ShellPumpLatencyMilliseconds.HasValue ? $"{shell.ShellPumpLatencyMilliseconds.Value:N0} ms" : "unknown")}`");
+        builder.AppendLine($"- Hung top-level windows: `{shell.HungTopLevelWindows:N0}`");
+        builder.AppendLine($"- Evidence: `{shell.EvidenceState}`");
+        builder.AppendLine();
+    }
+
+    private static string FormatBool(bool? value)
+    {
+        return value.HasValue ? value.Value.ToString() : "unknown";
+    }
+
+    private static string FormatCount(int? value)
+    {
+        return value.HasValue ? value.Value.ToString("N0") : "unknown";
     }
 
     private static string FormatSignalValue(PerformanceSignal signal)

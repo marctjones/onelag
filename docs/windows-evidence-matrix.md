@@ -4,6 +4,11 @@ OneLag should collect enough local evidence for a human or offline Codex/Claude 
 
 ## Implemented Lightweight Evidence
 
+- DPC and interrupt time, total and per-core maximum, plus DPCs queued and interrupts per second. The per-core maximum is the load-bearing one: a driver storm usually pins a single core, and the `_Total` instance averages that away.
+- Display topology via `QueryDisplayConfig`, including output technology, so DisplayLink-class indirect/USB displays are distinguished from internal panels and directly attached external monitors.
+- Bluetooth radio presence/state and connected-device count, read from the already-connected set without issuing a radio inquiry.
+- Derived dock state, wired-network state, and power source, attached to every watch sample so lag can be correlated with the machine's physical configuration.
+- Explorer shell message-pump latency and hung-window state, measured with `SendMessageTimeout` and `IsHungAppWindow` rather than inferred from folder shape.
 - OneDrive root discovery and bounded inventory.
 - Known OneDrive sync issue detection.
 - OneDrive process CPU, memory, version, and log-churn metadata.
@@ -34,6 +39,11 @@ OneLag should collect enough local evidence for a human or offline Codex/Claude 
 
 ## Analysis Rules
 
+- Rank every candidate cause against the same evidence. OneDrive is one hypothesis among ten, not the default.
+- Never promote a hypothesis on evidence that was not collected. An unmeasured hypothesis is `Unknown`, not exonerated.
+- Never promote OneDrive on static folder shape alone. Item count, high-churn directories, and sync blockers describe exposure; only live evidence describes a cause.
+- State evidence quality before any verdict. A capture with no live evidence must say so in place of a headline.
+- Treat DPC/interrupt pressure as evidence below user mode: OneDrive's user-mode sync engine cannot produce it.
 - Treat OneDrive as likely only when static folder risk aligns with live process, disk, log, event, or watch evidence.
 - Treat Files On-Demand counts as context, not proof of causality.
 - Escalate to WPR/WPA when user-mode evidence suggests scheduling delay, hard faults, driver/DPC behavior, or unexplained foreground stalls.

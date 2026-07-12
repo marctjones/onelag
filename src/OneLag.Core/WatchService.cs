@@ -9,7 +9,10 @@ public sealed record WatchStartOptions(
     TimeSpan Duration,
     TimeSpan Interval,
     string OutputDirectory,
-    int MaxSamples = 14_400);
+    int MaxSamples = 14_400)
+{
+    public TimeSpan HostContextInterval { get; init; } = TimeSpan.FromSeconds(30);
+}
 
 public sealed record WatchState(
     string State,
@@ -61,9 +64,13 @@ public sealed class WatchService
         var statePath = GetStatePath(directory);
         var samplesPath = GetSamplesPath(directory);
         var startedAt = DateTimeOffset.UtcNow;
-        var expected = Stopwatch.StartNew();
-        var nextExpected = options.Interval;
         var sampleCount = 0;
+
+        // Host context (display topology, Bluetooth radio, dock state) changes on the scale of minutes and
+        // is more expensive to enumerate than a counter read, so it is refreshed on its own cadence and
+        // attached to each sample rather than re-queried every tick.
+        HostContext? hostContext = null;
+        var hostContextAge = Stopwatch.StartNew();
 
         WriteState(statePath, new WatchState("running", startedAt, DateTimeOffset.UtcNow, directory, sampleCount));
 
@@ -74,16 +81,28 @@ public sealed class WatchService
                 break;
             }
 
+            // Timer drift is the overshoot of this one sleep, not the loop's cumulative lateness. The
+            // samplers themselves cost real time (PDH and process sampling each hold a window open), and
+            // measuring against a running schedule would fold that cost into drift and accumulate it, so
+            // every sample after the first would read as a lag episode with an ever-growing stall.
+            var tick = Stopwatch.StartNew();
             await Task.Delay(options.Interval, cancellationToken);
-            var drift = (expected.Elapsed - nextExpected).TotalMilliseconds;
-            nextExpected += options.Interval;
+            var drift = tick.Elapsed.TotalMilliseconds - options.Interval.TotalMilliseconds;
+
+            if (hostContext is null || hostContextAge.Elapsed >= options.HostContextInterval)
+            {
+                hostContext = platform.CaptureHostContext();
+                hostContextAge.Restart();
+            }
 
             var sample = new WatchSample(
                 DateTimeOffset.UtcNow,
                 drift,
                 platform.CaptureTelemetry(),
                 platform.CaptureSystemPressure(),
-                platform.GetForegroundProcessName());
+                platform.GetForegroundProcessName(),
+                hostContext,
+                platform.CaptureShellResponsiveness());
 
             AppendJsonLine(samplesPath, sample);
             sampleCount++;
@@ -170,6 +189,31 @@ public sealed class WatchService
         }
 
         var episodes = WatchEpisodeDetector.Detect(samples, markers);
+        var correlation = WatchContextCorrelation.Correlate(samples, episodes, InferSampleInterval(samples));
+
+        lines.Add(string.Empty);
+        lines.Add("## Configuration Correlation");
+        if (correlation.Buckets.Count == 0)
+        {
+            lines.Add("- No host context (displays, dock, Bluetooth) was captured, so lag cannot be correlated with the machine's configuration.");
+        }
+        else
+        {
+            lines.Add(string.Empty);
+            lines.Add("| Configuration | Samples | Observed | Episodes | Episodes/hour | Max drift | Max DPC |");
+            lines.Add("| --- | --- | --- | --- | --- | --- | --- |");
+            foreach (var bucket in correlation.Buckets)
+            {
+                var dpc = bucket.MaxDpcPercent.HasValue ? $"{bucket.MaxDpcPercent.Value:N1}%" : "unknown";
+                lines.Add($"| {bucket.Context} | {bucket.Samples:N0} | {bucket.Observed:hh\\:mm\\:ss} | {bucket.Episodes:N0} | {bucket.EpisodesPerHour:N1} | {bucket.MaxTimerDriftMilliseconds:N0} ms | {dpc} |");
+            }
+
+            if (!string.IsNullOrWhiteSpace(correlation.Conclusion))
+            {
+                lines.Add(string.Empty);
+                lines.Add(correlation.Conclusion);
+            }
+        }
 
         lines.Add(string.Empty);
         lines.Add("## Markers");
@@ -196,13 +240,51 @@ public sealed class WatchService
         lines.Add("## Largest Timer Delays");
         foreach (var sample in samples.OrderByDescending(sample => sample.TimerDriftMilliseconds).Take(10))
         {
-            lines.Add($"- `{sample.Timestamp:O}` drift `{sample.TimerDriftMilliseconds:N1} ms`, foreground `{sample.ForegroundProcess ?? "unknown"}`, telemetry `{sample.Telemetry.EvidenceState}`");
+            var signals = sample.SystemPressure.Signals ?? Array.Empty<PerformanceSignal>();
+            var dpc = PressureClassifier.Value(signals, "processor-dpc-percent-max-core")
+                ?? PressureClassifier.Value(signals, "processor-dpc-percent");
+            var shell = sample.ShellResponsiveness?.ShellWindowHung == true ? "shell-hung" : "shell-ok";
+            lines.Add($"- `{sample.Timestamp:O}` drift `{sample.TimerDriftMilliseconds:N1} ms`, foreground `{sample.ForegroundProcess ?? "unknown"}`, DPC `{(dpc.HasValue ? $"{dpc.Value:N1}%" : "unknown")}`, `{shell}`, config `{WatchContextCorrelation.DescribeContext(sample)}`");
+        }
+
+        var hungSamples = samples.Count(sample => sample.ShellResponsiveness?.ShellWindowHung == true);
+        if (hungSamples > 0)
+        {
+            lines.Add(string.Empty);
+            lines.Add("## Explorer Shell");
+            lines.Add($"- The Explorer shell was hung in `{hungSamples:N0}` of `{samples.Count:N0}` samples. This is the shell-blocking failure mode measured directly.");
         }
 
         lines.Add(string.Empty);
         lines.Add("## Interpretation");
-        lines.Add("Timer drift is a user-mode responsiveness canary. Episode categories are inferred from nearby user-mode samples. WPR/WPA is required to prove driver DPC/ISR root cause.");
+        lines.Add("Timer drift is a user-mode responsiveness canary: it proves the machine stalled but not what stalled it. DPC and interrupt time narrow the stall to kernel driver work, and the configuration correlation above narrows it to a hardware configuration. WPR/WPA with the DPC/ISR profile is still required to name the specific driver file.");
         return string.Join(Environment.NewLine, lines) + Environment.NewLine;
+    }
+
+    /// <summary>
+    /// Recovers the recording cadence from the samples themselves so a report can be rebuilt from a
+    /// directory without knowing what interval the session was started with.
+    /// </summary>
+    private static TimeSpan InferSampleInterval(IReadOnlyList<WatchSample> samples)
+    {
+        if (samples.Count < 2)
+        {
+            return TimeSpan.FromSeconds(2);
+        }
+
+        var deltas = samples
+            .OrderBy(sample => sample.Timestamp)
+            .Zip(samples.OrderBy(sample => sample.Timestamp).Skip(1), (first, second) => (second.Timestamp - first.Timestamp).TotalSeconds)
+            .Where(delta => delta > 0)
+            .OrderBy(delta => delta)
+            .ToArray();
+
+        if (deltas.Length == 0)
+        {
+            return TimeSpan.FromSeconds(2);
+        }
+
+        return TimeSpan.FromSeconds(deltas[deltas.Length / 2]);
     }
 
     private static void Validate(WatchStartOptions options)

@@ -65,6 +65,26 @@ public sealed class WindowsPlatformProbe : PortablePlatformProbe
             topProcessSamples);
     }
 
+    public override HostContext CaptureHostContext()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return base.CaptureHostContext();
+        }
+
+        return WindowsHostContextProbe.Capture(WindowsPerformanceSampler.CapturePowerState());
+    }
+
+    public override ShellResponsiveness CaptureShellResponsiveness()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return base.CaptureShellResponsiveness();
+        }
+
+        return WindowsShellProbe.Capture();
+    }
+
     public override OneDriveClientHealthSnapshot CaptureOneDriveClientHealth(IReadOnlyList<RootCandidate> roots, TelemetrySnapshot telemetry)
     {
         if (!OperatingSystem.IsWindows())

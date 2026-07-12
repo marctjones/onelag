@@ -13,6 +13,10 @@ public interface IPlatformProbe
     IReadOnlyList<EventLogSummary> ReadRecentEventSummaries(DateTimeOffset since);
 
     string? GetForegroundProcessName();
+
+    HostContext CaptureHostContext();
+
+    ShellResponsiveness CaptureShellResponsiveness();
 }
 
 public class PortablePlatformProbe : IPlatformProbe
@@ -79,6 +83,16 @@ public class PortablePlatformProbe : IPlatformProbe
     }
 
     public virtual string? GetForegroundProcessName() => null;
+
+    public virtual HostContext CaptureHostContext()
+    {
+        return HostContext.Unavailable("unavailable-on-this-platform");
+    }
+
+    public virtual ShellResponsiveness CaptureShellResponsiveness()
+    {
+        return ShellResponsiveness.Unavailable("unavailable-on-this-platform");
+    }
 
     private static void AddEnvironmentRoot(Dictionary<string, RootCandidate> roots, string variableName, string accountKind)
     {
