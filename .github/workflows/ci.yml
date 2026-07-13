@@ -103,6 +103,43 @@ jobs:
           if (($viewOutput -join "`n") -notmatch "Kind: Diagnostic") {
             throw "view smoke did not identify diagnostic report"
           }
+          $watch = Join-Path $env:RUNNER_TEMP "OneLagWatchSmoke"
+          $watchReport = Join-Path $env:RUNNER_TEMP "onelag-watch-smoke.md"
+          & $exe watch start --duration 1s --interval 1s --output $watch
+          if ($LASTEXITCODE -ne 0) {
+            throw "watch start smoke failed with exit code $LASTEXITCODE"
+          }
+          & $exe watch mark --output $watch --note "ci"
+          if ($LASTEXITCODE -ne 0) {
+            throw "watch mark smoke failed with exit code $LASTEXITCODE"
+          }
+          & $exe watch report --output $watch --report $watchReport
+          if ($LASTEXITCODE -ne 0) {
+            throw "watch report smoke failed with exit code $LASTEXITCODE"
+          }
+          $watchViewOutput = & $exe view --report $watchReport --timeline
+          if ($LASTEXITCODE -ne 0) {
+            throw "watch view smoke failed with exit code $LASTEXITCODE"
+          }
+          if (($watchViewOutput -join "`n") -notmatch "Kind: Watch") {
+            throw "watch view smoke did not identify watch report"
+          }
+          $bundle = Join-Path $env:RUNNER_TEMP "onelag-support-bundle-smoke"
+          & $exe support bundle --report $report --report $watchReport --output $bundle --zip
+          if ($LASTEXITCODE -ne 0) {
+            throw "support bundle smoke failed with exit code $LASTEXITCODE"
+          }
+          if (!(Test-Path (Join-Path $bundle "ANALYZE_WITH_CODEX_OR_CLAUDE.md"))) {
+            throw "support bundle smoke did not create analysis prompt"
+          }
+          if (!(Test-Path "$bundle.zip")) {
+            throw "support bundle smoke did not create zip"
+          }
+          & $exe repair reset-onedrive
+          if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 1) {
+            throw "repair dry-run returned unexpected exit code $LASTEXITCODE"
+          }
+          exit 0
 
       # Hosted Windows runners are elevated, so this is the one place the kernel ETW path actually executes.
       # It guards the two ways the driver trace fails silently: the native KernelTraceControl.dll being lost
@@ -157,41 +194,5 @@ jobs:
           $system = $eventLogs | Where-Object { $_.Name -like "System*" } | Select-Object -First 1
           if ($system -and ((Get-Content $system.FullName -Raw) -notmatch "<Event")) {
             throw "collect smoke event-log export contained no events"
-          }
-          $watch = Join-Path $env:RUNNER_TEMP "OneLagWatchSmoke"
-          $watchReport = Join-Path $env:RUNNER_TEMP "onelag-watch-smoke.md"
-          & $exe watch start --duration 1s --interval 1s --output $watch
-          if ($LASTEXITCODE -ne 0) {
-            throw "watch start smoke failed with exit code $LASTEXITCODE"
-          }
-          & $exe watch mark --output $watch --note "ci"
-          if ($LASTEXITCODE -ne 0) {
-            throw "watch mark smoke failed with exit code $LASTEXITCODE"
-          }
-          & $exe watch report --output $watch --report $watchReport
-          if ($LASTEXITCODE -ne 0) {
-            throw "watch report smoke failed with exit code $LASTEXITCODE"
-          }
-          $watchViewOutput = & $exe view --report $watchReport --timeline
-          if ($LASTEXITCODE -ne 0) {
-            throw "watch view smoke failed with exit code $LASTEXITCODE"
-          }
-          if (($watchViewOutput -join "`n") -notmatch "Kind: Watch") {
-            throw "watch view smoke did not identify watch report"
-          }
-          $bundle = Join-Path $env:RUNNER_TEMP "onelag-support-bundle-smoke"
-          & $exe support bundle --report $report --report $watchReport --output $bundle --zip
-          if ($LASTEXITCODE -ne 0) {
-            throw "support bundle smoke failed with exit code $LASTEXITCODE"
-          }
-          if (!(Test-Path (Join-Path $bundle "ANALYZE_WITH_CODEX_OR_CLAUDE.md"))) {
-            throw "support bundle smoke did not create analysis prompt"
-          }
-          if (!(Test-Path "$bundle.zip")) {
-            throw "support bundle smoke did not create zip"
-          }
-          & $exe repair reset-onedrive
-          if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 1) {
-            throw "repair dry-run returned unexpected exit code $LASTEXITCODE"
           }
           exit 0
