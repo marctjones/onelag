@@ -98,7 +98,18 @@ internal static class WindowsDriverTraceProbe
         processing.Set();
         session.Source.Process();
 
-        var eventsLost = session.EventsLost;
+        // Process() only returns once the session has stopped, and by then the controller handle is gone, so
+        // reading EventsLost queries a session that no longer exists and throws a COMException. The lost-event
+        // count is a quality footnote; losing it must not throw away an otherwise successful trace.
+        long eventsLost;
+        try
+        {
+            eventsLost = session.EventsLost;
+        }
+        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidOperationException or ObjectDisposedException)
+        {
+            eventsLost = -1;
+        }
 
         var drivers = accumulators
             .Select(entry => entry.Value.ToSample(entry.Key.Driver, entry.Key.Kind))
