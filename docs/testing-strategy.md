@@ -62,6 +62,28 @@ count caps, path sanitisation, the manifest, and the zip — is platform-neutral
 only *enumerates* sources (OneDrive logs, the Windows tree, `wevtutil` exports), and its real behaviour is a
 Tier-3 check.
 
+**Host context is the sharpest case, because the runner's hardware cannot reproduce it.** A headless Windows
+Server VM has no dock, no external monitors, and no DisplayLink driver, so the code that recognises an
+indirect/USB display and concludes "docked" — the exact logic that matters for the docked-versus-undocked
+bug — never executes there. So the interpretation is split from the read: `WindowsHostContextProbe` does only
+the P/Invoke, producing raw `RawDisplay` records straight from `DISPLAYCONFIG_PATH_TARGET_INFO`, and
+`HostContextInterpreter` (in Core) turns them into a classified, dock-derived `HostContext`.
+`HostContextInterpreterTests` then feeds it the exact output-technology values a real DisplayLink dock, a
+Thunderbolt monitor, and a laptop eDP panel produce, and asserts the classification — on any OS. The struct
+marshalling that yields those values is pinned by the interop-layout tests and validated live on the runner,
+so between the two, the whole path is covered without the hardware.
+
+## What The Runner Validates End To End
+
+Beyond the unit tests, CI drives the shipped executable on real Windows and asserts on the output, not just
+the exit code:
+
+- The scan report leads with `## Evidence Quality` and `## Ranked Causes`, and a scan with no OneDrive
+  running never reaches `OneDriveLikely`/`OneDrivePossible` — the live-evidence gate, proven end to end.
+- `selftest` reports the performance-counter and DPC/interrupt probes as live.
+- The kernel trace starts, stops cleanly, and names no culprit on an idle machine (no false positive).
+- `collect` pulls real event logs and Windows-tree logs into a manifested bundle, handling locked files.
+
 ### Tier 3 — Real Windows (runs only on Windows)
 
 Nothing above makes a single call into Windows. `WindowsProbeIntegrationTests` does, gated by

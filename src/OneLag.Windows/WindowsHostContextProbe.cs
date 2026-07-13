@@ -27,54 +27,26 @@ internal static class WindowsHostContextProbe
 
         try
         {
-            var displays = QueryDisplays(out var displayEvidence);
-            var external = displays.Count(display => !display.IsInternal && !display.IsIndirect);
-            var indirect = displays.Count(display => display.IsIndirect);
+            // The probe reads only raw structs; HostContextInterpreter (in Core, tested off Windows) turns
+            // them into the classified, dock-derived HostContext.
+            var rawDisplays = QueryRawDisplays(out var displayEvidence);
             var wiredUp = TryGetWiredNetworkUp();
             var (radioPresent, connectedDevices, bluetoothEvidence) = QueryBluetooth();
             var indirectDrivers = FindIndirectDisplaySoftware();
 
-            var dockState = DeriveDockState(displays.Count, external, indirect, wiredUp, powerState);
-
-            return new HostContext(
+            return HostContextInterpreter.Build(
                 DateTimeOffset.UtcNow,
-                displays.Count,
-                external,
-                indirect,
-                displays,
-                radioPresent,
-                radioPresent,
-                connectedDevices,
-                powerState,
+                rawDisplays,
+                new RawBluetooth(radioPresent, connectedDevices, bluetoothEvidence),
                 wiredUp,
+                powerState,
                 indirectDrivers,
-                dockState,
-                $"windows-display-config;{displayEvidence};{bluetoothEvidence}");
+                displayEvidence);
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
         {
             return HostContext.Unavailable("windows-host-context-entrypoint-unavailable");
         }
-    }
-
-    private static string DeriveDockState(int displayCount, int external, int indirect, bool? wiredUp, string powerState)
-    {
-        if (external > 0 || indirect > 0)
-        {
-            return DockStates.DockedLikely;
-        }
-
-        if (wiredUp == true && powerState.Contains("source=ac", StringComparison.OrdinalIgnoreCase))
-        {
-            return DockStates.DockedLikely;
-        }
-
-        if (displayCount <= 1 && wiredUp == false)
-        {
-            return DockStates.UndockedLikely;
-        }
-
-        return DockStates.Unknown;
     }
 
     private static bool? TryGetWiredNetworkUp()
@@ -125,13 +97,13 @@ internal static class WindowsHostContextProbe
         }
     }
 
-    private static IReadOnlyList<DisplayInfo> QueryDisplays(out string evidenceState)
+    private static IReadOnlyList<RawDisplay> QueryRawDisplays(out string evidenceState)
     {
         var sizeStatus = GetDisplayConfigBufferSizes(QdcOnlyActivePaths, out var pathCount, out var modeCount);
         if (sizeStatus != ErrorSuccess || pathCount == 0)
         {
             evidenceState = $"display-config-sizes-failed-{sizeStatus}";
-            return Array.Empty<DisplayInfo>();
+            return Array.Empty<RawDisplay>();
         }
 
         var paths = new DisplayConfigPathInfo[pathCount];
@@ -140,25 +112,22 @@ internal static class WindowsHostContextProbe
         if (queryStatus != ErrorSuccess)
         {
             evidenceState = $"query-display-config-failed-{queryStatus}";
-            return Array.Empty<DisplayInfo>();
+            return Array.Empty<RawDisplay>();
         }
 
-        var displays = new List<DisplayInfo>();
+        var displays = new List<RawDisplay>();
         for (var index = 0; index < pathCount; index++)
         {
             var path = paths[index];
-            var technology = path.TargetInfo.OutputTechnology;
 
             var (width, height) = ResolveSourceSize(path, modes, (int)modeCount);
             var refreshHz = path.TargetInfo.RefreshRate.Denominator > 0
                 ? (double)path.TargetInfo.RefreshRate.Numerator / path.TargetInfo.RefreshRate.Denominator
                 : 0;
 
-            displays.Add(new DisplayInfo(
-                ResolveName(path) ?? $"display-{index + 1}",
-                DescribeTechnology(technology),
-                IsInternalPanel(technology),
-                technology is OutputTechnologyIndirectWired or OutputTechnologyIndirectVirtual,
+            displays.Add(new RawDisplay(
+                path.TargetInfo.OutputTechnology,
+                ResolveName(path),
                 width,
                 height,
                 refreshHz));
@@ -201,39 +170,6 @@ internal static class WindowsHostContextProbe
         return DisplayConfigGetDeviceInfo(ref request) == ErrorSuccess && !string.IsNullOrWhiteSpace(request.MonitorFriendlyDeviceName)
             ? request.MonitorFriendlyDeviceName
             : null;
-    }
-
-    /// <summary>
-    /// Not every built-in panel reports INTERNAL. Laptop eDP panels commonly report DISPLAYPORT_EMBEDDED,
-    /// and older ones report LVDS. Treating those as external would count the laptop's own screen as an
-    /// attached monitor and report an undocked machine as docked.
-    /// </summary>
-    private static bool IsInternalPanel(uint technology)
-    {
-        return technology is OutputTechnologyInternal
-            or OutputTechnologyDisplayPortEmbedded
-            or OutputTechnologyUdiEmbedded
-            or OutputTechnologyLvds;
-    }
-
-    private static string DescribeTechnology(uint technology)
-    {
-        return technology switch
-        {
-            0 => "vga",
-            4 => "dvi",
-            5 => "hdmi",
-            6 => "lvds",
-            10 => "displayport-external",
-            11 => "displayport-embedded",
-            12 => "udi-external",
-            13 => "udi-embedded",
-            15 => "miracast",
-            OutputTechnologyIndirectWired => "indirect-wired-usb",
-            OutputTechnologyIndirectVirtual => "indirect-virtual",
-            OutputTechnologyInternal => "internal",
-            _ => $"other-{technology}"
-        };
     }
 
     private static (bool? RadioPresent, int? ConnectedDevices, string EvidenceState) QueryBluetooth()
@@ -335,12 +271,6 @@ internal static class WindowsHostContextProbe
     private const uint PathModeIdxInvalid = 0xffffffff;
     private const uint ModeInfoTypeSource = 1;
     private const uint DeviceInfoGetTargetName = 2;
-    private const uint OutputTechnologyLvds = 6;
-    private const uint OutputTechnologyDisplayPortEmbedded = 11;
-    private const uint OutputTechnologyUdiEmbedded = 13;
-    private const uint OutputTechnologyIndirectWired = 16;
-    private const uint OutputTechnologyIndirectVirtual = 17;
-    private const uint OutputTechnologyInternal = 0x80000000;
 
     [DllImport("user32.dll")]
     private static extern uint GetDisplayConfigBufferSizes(uint flags, out uint numPathArrayElements, out uint numModeInfoArrayElements);

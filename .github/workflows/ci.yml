@@ -103,6 +103,26 @@ jobs:
           if (($viewOutput -join "`n") -notmatch "Kind: Diagnostic") {
             throw "view smoke did not identify diagnostic report"
           }
+          # Validate the redesign end to end on real Windows: the report must lead with the new structure,
+          # and a scan with no OneDrive running must never implicate OneDrive (the live-evidence gate).
+          $reportText = Get-Content $report -Raw
+          foreach ($section in @("## Evidence Quality", "## Ranked Causes", "### OneDriveSync")) {
+            if ($reportText -notmatch [regex]::Escape($section)) {
+              throw "scan report is missing section '$section'"
+            }
+          }
+          if ($reportText -match "Diagnosis: ``(OneDriveLikely|OneDrivePossible)``") {
+            throw "scan with no OneDrive running implicated OneDrive; the live-evidence gate failed on real Windows"
+          }
+          # The self-test surface must report the two probes that decide whether a driver problem is even
+          # visible as live on real Windows. Exit code depends on the runner's hardware, so assert on content.
+          $selftest = (& $exe selftest) -join "`n"
+          if ($selftest -notmatch "\[OK  \] performance-counters") {
+            throw "selftest did not report live performance counters on real Windows: $selftest"
+          }
+          if ($selftest -notmatch "\[OK  \] dpc-interrupt-counters") {
+            throw "selftest did not report live DPC/interrupt counters on real Windows: $selftest"
+          }
           $watch = Join-Path $env:RUNNER_TEMP "OneLagWatchSmoke"
           $watchReport = Join-Path $env:RUNNER_TEMP "onelag-watch-smoke.md"
           & $exe watch start --duration 1s --interval 1s --output $watch
