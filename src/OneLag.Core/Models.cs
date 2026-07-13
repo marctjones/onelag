@@ -96,7 +96,8 @@ public sealed record ScanOptions(
     string OutputPath,
     string Format,
     bool FullPaths,
-    int MaxItems = 500_000);
+    int MaxItems = 500_000,
+    TimeSpan? DriverTraceDuration = null);
 
 public sealed record DirectoryRisk(
     string Path,
@@ -249,6 +250,32 @@ public sealed record ShellResponsiveness(
         evidenceState);
 }
 
+public sealed record DriverLatencySample(
+    string Driver,
+    string Kind,
+    double TotalMilliseconds,
+    double MaxMilliseconds,
+    long Count);
+
+/// <summary>
+/// Attribution of kernel DPC and ISR time to specific driver images.
+///
+/// The DPC counters can say that a driver is stalling the machine. Only a kernel trace can say which one.
+/// This is the difference between "escalate to WPR" and an answer.
+/// </summary>
+public sealed record DriverLatencyAttribution(
+    DateTimeOffset StartedAt,
+    TimeSpan Duration,
+    IReadOnlyList<DriverLatencySample> Drivers,
+    string EvidenceState)
+{
+    public static DriverLatencyAttribution Unavailable(string evidenceState) => new(
+        DateTimeOffset.UtcNow,
+        TimeSpan.Zero,
+        Array.Empty<DriverLatencySample>(),
+        evidenceState);
+}
+
 public sealed record Hypothesis(
     HypothesisKind Kind,
     HypothesisVerdict Verdict,
@@ -317,7 +344,8 @@ public sealed record DiagnosticReport(
     HostContext? HostContext = null,
     ShellResponsiveness? ShellResponsiveness = null,
     IReadOnlyList<Hypothesis>? Hypotheses = null,
-    EvidenceQuality? EvidenceQuality = null);
+    EvidenceQuality? EvidenceQuality = null,
+    DriverLatencyAttribution? DriverLatency = null);
 
 public sealed record WatchSample(
     DateTimeOffset Timestamp,

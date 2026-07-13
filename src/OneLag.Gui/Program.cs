@@ -249,9 +249,49 @@ internal sealed class MainForm : Form
         AddRow(layout, "Max items", scanMaxItemsBox);
         var runButton = new Button { Text = "Run Scan", AutoSize = true };
         runButton.Click += async (_, _) => await RunScanAsync();
-        AddCommandRow(layout, runButton);
+        var traceButton = new Button { Text = "Trace Drivers (30s)", AutoSize = true };
+        traceButton.Click += async (_, _) => await RunDriverTraceAsync();
+        AddCommandRow(layout, runButton, traceButton);
         page.Controls.Add(layout);
         return page;
+    }
+
+    /// <summary>
+    /// Names the driver holding the CPU at high IRQL. Needs administrator rights, so it says so plainly
+    /// rather than returning an empty result.
+    /// </summary>
+    private async Task RunDriverTraceAsync()
+    {
+        try
+        {
+            Log("Tracing kernel DPC and ISR activity for 30s. Reproduce the lag now: move the mouse, drag a window.");
+
+            var attribution = await Task.Run(() => new WindowsPlatformProbe()
+                .CaptureDriverLatency(TimeSpan.FromSeconds(30), CancellationToken.None));
+
+            if (attribution.EvidenceState == "requires-administrator")
+            {
+                Log("A kernel trace needs administrator rights. Restart OneLag as administrator and try again.");
+                return;
+            }
+
+            var drivers = DriverClassifier.Significant(attribution);
+            if (drivers.Count == 0)
+            {
+                Log("No driver accumulated meaningful high-IRQL time during the trace window.");
+                return;
+            }
+
+            foreach (var driver in drivers.Take(5))
+            {
+                var subsystem = DriverClassifier.Classify(driver.Driver).Subsystem ?? "unclassified";
+                Log($"Driver {driver.Driver}: {driver.TotalMilliseconds:N1} ms {driver.Kind.ToUpperInvariant()} total, worst {driver.MaxMilliseconds:N2} ms ({subsystem})");
+            }
+        }
+        catch (Exception ex)
+        {
+            ShowError(ex);
+        }
     }
 
     private TabPage BuildSupportTab()
@@ -343,19 +383,33 @@ internal sealed class MainForm : Form
         {
             var output = Path.GetFullPath(scanOutputBox.Text);
             var roots = string.IsNullOrWhiteSpace(scanRootBox.Text) ? Array.Empty<string>() : new[] { scanRootBox.Text };
-            await Task.Run(() =>
+            var report = await Task.Run(() =>
             {
                 var platform = new WindowsPlatformProbe();
-                var report = new ScanRunner(platform, new InventoryScanner(), new RiskEngine()).Run(
+                var result = new ScanRunner(platform, new InventoryScanner(), new RiskEngine()).Run(
                     new ScanOptions(roots, output, "markdown", FullPaths: false, (int)scanMaxItemsBox.Value),
                     CancellationToken.None);
-                var redactor = new Redactor(fullPaths: false, report.Roots.Select(root => root.Path));
+                var redactor = new Redactor(fullPaths: false, result.Roots.Select(root => root.Path));
                 Directory.CreateDirectory(Path.GetDirectoryName(output) ?? Environment.CurrentDirectory);
-                File.WriteAllText(output, ReportWriter.ToMarkdown(report, redactor));
+                File.WriteAllText(output, ReportWriter.ToMarkdown(result, redactor));
+                return result;
             });
 
             reportPathBox.Text = output;
             bundleReportPathBox.Text = output;
+
+            if (report.EvidenceQuality is { } quality)
+            {
+                Log($"Evidence quality: {quality.Grade} ({quality.Score}/100). {quality.Summary}");
+            }
+
+            foreach (var hypothesis in (report.Hypotheses ?? Array.Empty<Hypothesis>())
+                .Where(candidate => candidate.Verdict is HypothesisVerdict.Possible or HypothesisVerdict.Likely or HypothesisVerdict.StronglySupported)
+                .Take(3))
+            {
+                Log($"Cause: {hypothesis.Kind} - {hypothesis.Verdict} (score {hypothesis.Score}). Next: {hypothesis.NextStep}");
+            }
+
             Log($"Scan report written: {output}");
         }
         catch (Exception ex)

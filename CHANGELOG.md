@@ -16,6 +16,16 @@ OneDrive is no longer the only hypothesis the tool can hold. See [differential d
 - Added `DisplayOrDockSuspected`, `InputOrBluetoothSuspected`, and `ShellBlocked` watch-episode categories, and reordered categorization so a kernel-level stall is not attributed to the foreground app it happens to be starving.
 - Sync-restriction findings and rename guidance now surface as sync hygiene regardless of the lag diagnosis, rather than being gated behind an OneDrive verdict they should never have driven.
 
+### Driver attribution and the docked/undocked experiment
+
+- Added `onelag trace dpc`: a bounded kernel ETW session that records every DPC and ISR, maps the routine address into the loaded kernel image that contains it, and reports drivers by the time they spent at high IRQL. The counters could prove *a* driver was stalling the machine; this names it. Elevation-gated and explicitly invoked, so it is never part of the default scan.
+- Added `DriverClassifier`, which maps a driver image to the subsystem that owns it (DisplayLink-class USB graphics, GPU, Thunderbolt/USB4, Bluetooth stack, Wi-Fi 2.4 GHz coexistence, storage, cloud-files filter, Defender filter), so attributed DPC time strengthens the hypothesis it belongs to instead of sitting in a table as trivia.
+- Added `scan --trace-drivers <duration>` to fold a driver trace into a full diagnostic report.
+- Added `onelag compare --session A --session B`, which pools watch sessions recorded in different hardware configurations and reports lag episodes per hour for each. This is the docked-versus-undocked experiment, made from recorded evidence rather than memory.
+- Bluetooth devices are now enumerated through the PnP device tree, which sees Bluetooth LE peripherals. The Bluetooth API's own enumeration cannot, and most modern mice and keyboards are LE.
+- The GUI reports evidence quality and ranked causes after a scan, and has a driver-trace button.
+- The support-bundle analysis prompt now instructs offline review to lead with evidence quality, to check for live OneDrive evidence before accepting folder shape as a cause, to check the per-core DPC signal, to check the configuration correlation, and not to blame OneDrive merely because the bundle came from a tool named OneLag.
+
 ### Fixed
 
 - Watch-mode timer drift was measured against a running schedule, so the samplers' own cost (PDH and process sampling each hold a window open) was folded into drift and accumulated. Every sample after the first read as a lag episode with an ever-growing stall, which would have made an all-day watch session produce nothing but false positives. Drift now measures the overshoot of each individual sleep.

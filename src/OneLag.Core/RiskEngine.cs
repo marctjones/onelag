@@ -27,7 +27,8 @@ public sealed class RiskEngine
         OneDriveClientHealthSnapshot clientHealth,
         IReadOnlyList<EventLogSummary> eventLogs,
         HostContext? hostContext = null,
-        ShellResponsiveness? shell = null)
+        ShellResponsiveness? shell = null,
+        DriverLatencyAttribution? driverLatency = null)
     {
         var findings = new List<Finding>();
         var recommendations = new List<Recommendation>();
@@ -61,7 +62,23 @@ public sealed class RiskEngine
             eventLogs,
             hostContext,
             shell,
-            evidenceQuality));
+            evidenceQuality,
+            MaxTimerDriftMilliseconds: null,
+            driverLatency));
+
+        var namedDrivers = DriverClassifier.Significant(driverLatency);
+        if (namedDrivers.Count > 0)
+        {
+            var top = namedDrivers[0];
+            var classification = DriverClassifier.Classify(top.Driver);
+            findings.Add(new Finding(
+                Severity.HighRisk,
+                "A kernel driver was named as the source of high-IRQL time",
+                $"A kernel trace attributed {top.TotalMilliseconds:N1} ms of {top.Kind.ToUpperInvariant()} time to `{top.Driver}`" +
+                $"{(classification.Subsystem is null ? string.Empty : $" ({classification.Subsystem})")}, " +
+                $"worst single {top.Kind.ToUpperInvariant()} {top.MaxMilliseconds:N2} ms across {top.Count:N0} occurrences.",
+                "high"));
+        }
 
         if (evidenceQuality.Grade == EvidenceGrade.Insufficient)
         {

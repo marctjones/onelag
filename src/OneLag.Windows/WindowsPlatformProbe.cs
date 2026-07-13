@@ -85,6 +85,16 @@ public sealed class WindowsPlatformProbe : PortablePlatformProbe
         return WindowsShellProbe.Capture();
     }
 
+    public override DriverLatencyAttribution CaptureDriverLatency(TimeSpan duration, CancellationToken cancellationToken)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return base.CaptureDriverLatency(duration, cancellationToken);
+        }
+
+        return WindowsDriverTraceProbe.Capture(duration, cancellationToken);
+    }
+
     public override OneDriveClientHealthSnapshot CaptureOneDriveClientHealth(IReadOnlyList<RootCandidate> roots, TelemetrySnapshot telemetry)
     {
         if (!OperatingSystem.IsWindows())

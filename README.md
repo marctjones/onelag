@@ -51,6 +51,51 @@ onelag watch mark
 onelag watch report --report onelag-watch-report.md
 ```
 
+Name the driver holding the CPU at high IRQL. This needs an elevated terminal, and you should reproduce the
+lag while it runs:
+
+```powershell
+onelag trace dpc --duration 30s --output onelag-driver-trace.md
+```
+
+Compare lag rates across hardware configurations, for example a docked day against an undocked day:
+
+```powershell
+onelag compare --session docked-day --session undocked-day --output onelag-comparison.md
+```
+
+## Finding Lag That Only Happens When Docked
+
+If the machine is fine undocked and slow on the dock, the lag tracks the hardware, not the sync load. Record
+both configurations and let the tool compare them.
+
+Record a normal working day on the dock, with the monitors and Bluetooth peripherals you usually use. Press
+the lag marker whenever it stutters:
+
+```powershell
+onelag watch start --duration 8h --output docked-day
+onelag watch mark --output docked-day --note "cursor stuttered dragging a window"
+```
+
+Record another working day undocked, on the internal panel, with Bluetooth off:
+
+```powershell
+onelag watch start --duration 8h --output undocked-day
+```
+
+Compare them:
+
+```powershell
+onelag compare --session docked-day --session undocked-day --output onelag-comparison.md
+```
+
+If the lag concentrates in one configuration, run the driver trace from an elevated terminal *while in that
+configuration* to name the driver:
+
+```powershell
+onelag trace dpc --duration 30s
+```
+
 Review the supported OneDrive reset plan without changing anything:
 
 ```powershell
@@ -185,6 +230,8 @@ Implemented in the current preview:
 
 - .NET solution split into core, Windows platform probe, CLI, and tests.
 - Ranked differential across ten candidate causes, with supporting and opposing evidence and a specific next step for each, plus a live-evidence gate that stops static folder shape from implicating OneDrive on its own.
+- `onelag trace dpc`, a bounded kernel ETW trace that attributes DPC and ISR time to specific driver images and maps each driver to the subsystem it belongs to, so the tool names the driver instead of handing out a WPR runbook.
+- `onelag compare`, which compares watch sessions recorded in different hardware configurations and reports lag episodes per hour for each.
 - Evidence-quality grading (`Complete`, `Partial`, `Insufficient`) stated above the verdict, so a capture with no live evidence says so instead of reading as authoritative.
 - DPC and interrupt sampling including per-core maximums, so a driver storm pinning one core is not averaged away.
 - Host-context sampling: display topology including DisplayLink-class indirect/USB displays, Bluetooth radio and connected devices, power source, and derived dock state.
@@ -212,8 +259,7 @@ Implemented in the current preview:
 
 Still roadmap work:
 
-- Real Windows 11 validation of the DPC, display-topology, Bluetooth, and shell probes. All of the new Windows code degrades to an explicit `unavailable` evidence state rather than failing, but none of it has been observed against real hardware yet.
-- Naming the offending driver. OneLag can now say a driver is stalling the machine and that the lag tracks the dock; saying which `.sys` file still requires an ETW trace.
+- Real Windows 11 validation of the DPC, driver-trace, display-topology, Bluetooth, and shell probes. All of the new Windows code degrades to an explicit `unavailable` evidence state rather than failing, but none of it has been observed against real hardware yet.
 - Signed MSI/EXE installer.
 - Deeper Windows-only validation for Files On-Demand states, WPR/WPA, and ProcMon escalation runbooks.
 - Real Windows 11 laptop validation run on a self-hosted runner.

@@ -112,8 +112,10 @@ Design record: [differential design](docs/differential-design.md).
 - Sample host context: display topology, indirect/USB displays, Bluetooth, power, and dock state.
 - Probe Explorer shell responsiveness directly.
 - Correlate watch episodes with the hardware configuration they happened in.
+- Attribute DPC and ISR time to a specific driver image via a bounded ETW session, and map each driver to the subsystem that owns it.
+- Compare watch sessions recorded in different hardware configurations (`onelag compare`).
+- Enumerate Bluetooth LE peripherals through the PnP device tree.
 - Validate the new Windows probes on a real Windows 11 laptop, docked and undocked.
-- Attribute DPC time to a specific driver image via a bounded ETW session.
 
 ## Later
 

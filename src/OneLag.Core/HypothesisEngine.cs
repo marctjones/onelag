@@ -9,7 +9,8 @@ public sealed record HypothesisInputs(
     HostContext? HostContext,
     ShellResponsiveness? Shell,
     EvidenceQuality EvidenceQuality,
-    double? MaxTimerDriftMilliseconds = null);
+    double? MaxTimerDriftMilliseconds = null,
+    DriverLatencyAttribution? DriverLatency = null);
 
 /// <summary>
 /// Ranks candidate causes of desktop lag.
@@ -44,9 +45,79 @@ public sealed class HypothesisEngine
         };
 
         return hypotheses
+            .Select(hypothesis => ApplyDriverAttribution(hypothesis, inputs))
             .OrderByDescending(hypothesis => hypothesis.Score)
             .ThenBy(hypothesis => hypothesis.Kind.ToString(), StringComparer.Ordinal)
             .ToArray();
+    }
+
+    /// <summary>
+    /// A named driver is the strongest evidence the tool can produce. When a kernel trace attributes real
+    /// DPC or ISR time to a driver image, that time is credited to the subsystem the driver belongs to,
+    /// rather than left as trivia in a table.
+    /// </summary>
+    private static Hypothesis ApplyDriverAttribution(Hypothesis hypothesis, HypothesisInputs inputs)
+    {
+        var significant = DriverClassifier.Significant(inputs.DriverLatency);
+        if (significant.Count == 0)
+        {
+            return hypothesis;
+        }
+
+        // DriverInterruptLatency is the general "a driver is stalling this machine" hypothesis, so any named
+        // driver supports it. The subsystem hypotheses only take the drivers that belong to them.
+        var attributed = significant
+            .Select(driver => (Driver: driver, Classification: DriverClassifier.Classify(driver.Driver)))
+            .Where(entry => hypothesis.Kind == HypothesisKind.DriverInterruptLatency
+                || entry.Classification.Kind == hypothesis.Kind)
+            .ToArray();
+
+        if (attributed.Length == 0)
+        {
+            return hypothesis;
+        }
+
+        var supporting = hypothesis.Supporting.ToList();
+        var score = hypothesis.Score;
+
+        foreach (var (driver, classification) in attributed.Take(3))
+        {
+            // Milliseconds of high-IRQL time over the trace window. A single routine over about 1 ms is
+            // already enough to drop a frame and stutter the cursor.
+            score += driver.TotalMilliseconds >= 100 ? 45 : 30;
+
+            var subsystem = classification.Subsystem is null
+                ? string.Empty
+                : $" - {classification.Subsystem}";
+
+            supporting.Add(
+                $"Kernel trace attributed {driver.TotalMilliseconds:N1} ms of {driver.Kind.ToUpperInvariant()} time " +
+                $"(worst single routine {driver.MaxMilliseconds:N2} ms, {driver.Count:N0} occurrences) " +
+                $"to `{driver.Driver}`{subsystem}.");
+        }
+
+        // A kernel trace is a direct measurement, so any earlier "this could not be measured" evidence is now
+        // stale. Leaving it in place would produce a report that calls a hypothesis strongly supported and
+        // untested in the same breath.
+        var opposing = hypothesis.Opposing
+            .Where(evidence => !evidence.Contains("untested", StringComparison.OrdinalIgnoreCase)
+                && !evidence.Contains("could not be measured", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        var top = attributed[0];
+        var topSubsystem = top.Classification.Subsystem is null
+            ? string.Empty
+            : $" ({top.Classification.Subsystem})";
+        var nextStep = $"`{top.Driver.Driver}`{topSubsystem} is holding the CPU at high IRQL. Update or roll back that driver, or disconnect the hardware it serves, then re-run `onelag trace dpc` to confirm the time drops.";
+
+        return hypothesis with
+        {
+            Score = score,
+            Verdict = Verdict(score, inputs.EvidenceQuality),
+            Supporting = supporting,
+            Opposing = opposing,
+            NextStep = nextStep
+        };
     }
 
     private static Hypothesis EvaluateOneDriveSync(HypothesisInputs inputs)

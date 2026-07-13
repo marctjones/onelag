@@ -89,7 +89,40 @@ public sealed class LocalReportViewService : IReportViewService
             var totalDirectories = report.Inventories.Sum(inventory => inventory.DirectoryCount);
             var highRiskDirectories = report.Inventories.Sum(inventory => inventory.HighRiskDirectories.Count);
             var syncBlockers = report.Inventories.Sum(inventory => inventory.SyncBlockers.Count);
-            var keyFacts = new List<string>
+            var keyFacts = new List<string>();
+
+            // Evidence quality and the ranked cause come first: they are what tells the reader whether
+            // anything else on the list is worth believing.
+            if (report.EvidenceQuality is { } quality)
+            {
+                keyFacts.Add($"Evidence quality: {quality.Grade} ({quality.Score}/100)");
+            }
+
+            var rankedCauses = report.Hypotheses ?? Array.Empty<Hypothesis>();
+            foreach (var hypothesis in rankedCauses
+                .Where(candidate => candidate.Verdict is HypothesisVerdict.Possible or HypothesisVerdict.Likely or HypothesisVerdict.StronglySupported)
+                .Take(3))
+            {
+                keyFacts.Add($"Cause: {hypothesis.Kind} ({hypothesis.Verdict}, score {hypothesis.Score})");
+            }
+
+            var namedDrivers = DriverClassifier.Significant(report.DriverLatency);
+            foreach (var driver in namedDrivers.Take(3))
+            {
+                keyFacts.Add($"Driver at high IRQL: {driver.Driver} ({driver.Kind}, {driver.TotalMilliseconds:N1} ms)");
+            }
+
+            if (report.HostContext is { } host)
+            {
+                keyFacts.Add($"Host: {host.DockState}, displays {host.DisplayCount:N0} ({host.ExternalDisplayCount:N0} external, {host.IndirectDisplayCount:N0} indirect/USB), bluetooth {(host.BluetoothRadioEnabled == true ? "on" : "off")}");
+            }
+
+            if (report.ShellResponsiveness is { ShellWindowHung: true })
+            {
+                keyFacts.Add("Explorer shell was hung");
+            }
+
+            keyFacts.AddRange(new[]
             {
                 $"Diagnosis: {report.Diagnosis}",
                 $"Roots: {report.Roots.Count:N0}",
@@ -101,7 +134,7 @@ public sealed class LocalReportViewService : IReportViewService
                 $"Recommendations: {report.Recommendations.Count:N0}",
                 $"Telemetry: {report.Telemetry.EvidenceState}",
                 $"System pressure: {report.SystemPressure.EvidenceState}"
-            };
+            });
 
             var timeline = new List<ReportTimelineItem>
             {
@@ -149,10 +182,37 @@ public sealed class LocalReportViewService : IReportViewService
     private static LocalReportSummary SummarizeDiagnosticMarkdown(string path, string text)
     {
         var sections = MarkdownSections(text);
-        var keyFacts = TopBulletsBeforeFirstSection(text)
+        var keyFacts = new List<string>();
+
+        // The ranked-cause table and evidence-quality banner are the headline of a diagnostic report, so a
+        // summary that omitted them would reproduce the old failure of leading with the OneDrive verdict.
+        if (sections.TryGetValue("Evidence Quality", out var qualityLines))
+        {
+            var grade = qualityLines.FirstOrDefault(line => line.StartsWith("**", StringComparison.Ordinal));
+            if (grade is not null)
+            {
+                keyFacts.Add($"Evidence quality: {CleanMarkdownText(grade)}");
+            }
+        }
+
+        if (sections.TryGetValue("Ranked Causes", out var causeLines))
+        {
+            foreach (var row in causeLines
+                .Where(line => line.StartsWith("| ", StringComparison.Ordinal))
+                .Skip(2)
+                .Take(3))
+            {
+                var cells = row.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                if (cells.Length >= 3 && !cells[1].Equals("NotSupported", StringComparison.Ordinal) && !cells[1].Equals("Unknown", StringComparison.Ordinal))
+                {
+                    keyFacts.Add($"Cause: {cells[0]} ({cells[1]}, score {cells[2]})");
+                }
+            }
+        }
+
+        keyFacts.AddRange(TopBulletsBeforeFirstSection(text)
             .Select(CleanMarkdownText)
-            .Take(12)
-            .ToArray();
+            .Take(12));
 
         var timeline = new List<ReportTimelineItem>();
         if (sections.TryGetValue("Recent Windows Events", out var eventLines))

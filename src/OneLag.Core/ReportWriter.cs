@@ -36,6 +36,7 @@ public static class ReportWriter
 
         AppendEvidenceQuality(builder, report.EvidenceQuality);
         AppendHypotheses(builder, report.Hypotheses);
+        AppendDriverLatency(builder, report.DriverLatency);
         AppendHostContext(builder, report.HostContext, redactor);
         AppendShellResponsiveness(builder, report.ShellResponsiveness);
 
@@ -246,6 +247,45 @@ public static class ReportWriter
             builder.AppendLine($"Next step: {hypothesis.NextStep}");
             builder.AppendLine();
         }
+    }
+
+    public static void AppendDriverLatency(StringBuilder builder, DriverLatencyAttribution? driverLatency)
+    {
+        if (driverLatency is null)
+        {
+            return;
+        }
+
+        builder.AppendLine("## Driver Interrupt Attribution");
+        builder.AppendLine();
+        builder.AppendLine($"- Trace window: `{driverLatency.Duration}`");
+        builder.AppendLine($"- Evidence: `{driverLatency.EvidenceState}`");
+        builder.AppendLine();
+
+        if (driverLatency.Drivers.Count == 0)
+        {
+            builder.AppendLine(driverLatency.EvidenceState switch
+            {
+                "requires-administrator" => "The kernel trace needs an elevated terminal. Re-run `onelag trace dpc` from an administrator prompt.",
+                "unavailable-on-this-platform" => "Kernel tracing is only available on Windows.",
+                _ => "No DPC or ISR events were recorded during the trace window."
+            });
+
+            builder.AppendLine();
+            return;
+        }
+
+        builder.AppendLine("| Driver | Kind | Total ms | Worst ms | Count | Subsystem |");
+        builder.AppendLine("| --- | --- | --- | --- | --- | --- |");
+        foreach (var driver in driverLatency.Drivers)
+        {
+            var subsystem = DriverClassifier.Classify(driver.Driver).Subsystem ?? "unclassified";
+            builder.AppendLine($"| `{driver.Driver}` | {driver.Kind} | {driver.TotalMilliseconds:N1} | {driver.MaxMilliseconds:N2} | {driver.Count:N0} | {subsystem} |");
+        }
+
+        builder.AppendLine();
+        builder.AppendLine("Total ms is time spent at high IRQL across the trace window. Worst ms is the longest single routine: anything above about 1 ms is enough to drop frames and stutter the cursor.");
+        builder.AppendLine();
     }
 
     private static void AppendHostContext(StringBuilder builder, HostContext? host, Redactor redactor)

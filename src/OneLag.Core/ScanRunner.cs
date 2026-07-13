@@ -26,6 +26,11 @@ public sealed class ScanRunner
         var hostContext = platformProbe.CaptureHostContext();
         var shell = platformProbe.CaptureShellResponsiveness();
 
+        // Kernel tracing is opt-in and elevation-gated, so it never runs unless explicitly asked for.
+        var driverLatency = options.DriverTraceDuration is { } traceDuration
+            ? platformProbe.CaptureDriverLatency(traceDuration, cancellationToken)
+            : null;
+
         var inventories = new List<InventorySummary>();
         foreach (var root in roots)
         {
@@ -33,7 +38,7 @@ public sealed class ScanRunner
             inventories.Add(inventoryScanner.Scan(root.Path, options.MaxItems, cancellationToken));
         }
 
-        var analysis = riskEngine.Analyze(inventories, telemetry, pressure, clientHealth, eventLogs, hostContext, shell);
+        var analysis = riskEngine.Analyze(inventories, telemetry, pressure, clientHealth, eventLogs, hostContext, shell, driverLatency);
         return new DiagnosticReport(
             started,
             DateTimeOffset.UtcNow,
@@ -49,7 +54,8 @@ public sealed class ScanRunner
             hostContext,
             shell,
             analysis.Hypotheses,
-            analysis.EvidenceQuality);
+            analysis.EvidenceQuality,
+            driverLatency);
     }
 
     private static IReadOnlyList<RootCandidate> ResolveRoots(IReadOnlyList<string> requestedRoots, IReadOnlyList<RootCandidate> discoveredRoots)

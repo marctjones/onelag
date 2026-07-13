@@ -103,6 +103,34 @@ jobs:
           if (($viewOutput -join "`n") -notmatch "Kind: Diagnostic") {
             throw "view smoke did not identify diagnostic report"
           }
+
+      # Hosted Windows runners are elevated, so this is the one place the kernel ETW path actually executes.
+      # It guards the two ways the driver trace fails silently: the native KernelTraceControl.dll being lost
+      # by single-file publish, and the session hanging instead of stopping at the end of its window.
+      - name: Smoke kernel driver trace
+        if: runner.os == 'Windows'
+        timeout-minutes: 3
+        shell: pwsh
+        run: |
+          $exe = Join-Path $PWD "artifacts/publish/win-x64/onelag.exe"
+          $trace = Join-Path $env:RUNNER_TEMP "onelag-ci-trace.md"
+          & $exe trace dpc --duration 10s --output $trace
+          if ($LASTEXITCODE -ne 0) {
+            throw "trace dpc smoke failed with exit code $LASTEXITCODE"
+          }
+          if (!(Test-Path $trace)) {
+            throw "trace dpc smoke did not create report"
+          }
+          $traceText = Get-Content $trace -Raw
+          if ($traceText -match "trace-runtime-unavailable") {
+            throw "trace dpc could not load its native dependency; KernelTraceControl.dll is missing from the published payload"
+          }
+          if ($traceText -match "requires-administrator") {
+            throw "trace dpc did not detect elevation on an elevated runner"
+          }
+          if ($traceText -notmatch "windows-kernel-etw") {
+            throw "trace dpc did not run a kernel session; report said: $traceText"
+          }
           $watch = Join-Path $env:RUNNER_TEMP "OneLagWatchSmoke"
           $watchReport = Join-Path $env:RUNNER_TEMP "onelag-watch-smoke.md"
           & $exe watch start --duration 1s --interval 1s --output $watch

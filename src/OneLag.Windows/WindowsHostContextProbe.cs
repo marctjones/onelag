@@ -259,14 +259,19 @@ internal static class WindowsHostContextProbe
 
         try
         {
-            // BluetoothFindFirstDevice is documented not to enumerate Bluetooth LE devices, and most modern
-            // mice and keyboards are LE. A zero here therefore means "no classic devices", not "nothing is
-            // connected", so it is reported as unknown rather than as a confident zero that would wrongly
-            // weaken the Bluetooth hypothesis.
+            // Prefer the PnP device tree, which sees Bluetooth LE peripherals. BluetoothFindFirstDevice is
+            // documented not to enumerate LE devices, and most modern mice and keyboards are LE, so a count
+            // from it alone would miss exactly the peripherals worth correlating with lag.
+            var pnp = WindowsBluetoothDeviceProbe.Count();
+            if (pnp.Connected.HasValue)
+            {
+                return (true, pnp.Connected, $"bluetooth-radio-enumerated;{pnp.EvidenceState};present={pnp.Present}");
+            }
+
             var classicConnected = CountConnectedDevices(radioHandle);
             return classicConnected > 0
-                ? (true, classicConnected, "bluetooth-radio-enumerated;classic-devices-counted;ble-not-enumerated")
-                : (true, null, "bluetooth-radio-enumerated;no-classic-devices;ble-not-enumerated");
+                ? (true, classicConnected, $"bluetooth-radio-enumerated;classic-only-fallback;{pnp.EvidenceState}")
+                : (true, null, $"bluetooth-radio-enumerated;no-classic-devices;ble-not-enumerated;{pnp.EvidenceState}");
         }
         finally
         {

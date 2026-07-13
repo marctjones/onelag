@@ -132,21 +132,39 @@ A snapshot scan can never produce that sentence. It is the single most diagnosti
 - Bluetooth device enumeration reads only the already-connected set. It never issues a radio inquiry, which
   would put a scan in the middle of a diagnostic sample.
 
+### The driver gets named
+
+`onelag trace dpc` runs a bounded kernel ETW session. It records every DPC and ISR with the address of the
+routine that ran, builds a map of loaded kernel images from the ImageLoad rundown, resolves each routine
+address into the image that contains it, and reports drivers by the time they spent at high IRQL.
+
+`DriverClassifier` then maps each driver image to the subsystem that owns it — DisplayLink-class USB
+graphics, GPU kernel drivers, Thunderbolt/USB4, the Bluetooth stack, Wi-Fi (which shares the 2.4 GHz band
+with Bluetooth), storage, the cloud-files filter, the Defender filter — so attributed DPC time strengthens
+the hypothesis it belongs to rather than sitting in the report as trivia. A named DisplayLink driver
+promotes the display-and-dock hypothesis above OneDrive on its own.
+
+This is elevation-gated and explicitly invoked. It is never part of the default scan path, which keeps the
+project's promise not to start heavy tracing on its own.
+
+### The experiment is a command
+
+`onelag compare --session docked-day --session undocked-day` pools watch sessions recorded in different
+hardware configurations, groups every episode by the configuration it happened in, and reports episodes per
+hour for each. The user who is fine undocked in the office and slow docked at home has already run this
+experiment by accident; this makes the same comparison from recorded evidence.
+
 ## Known Limits Of The New Probes
 
-- **Bluetooth LE is invisible.** `BluetoothFindFirstDevice` does not enumerate LE devices, and most modern
-  mice and keyboards are LE. When no classic device is found, the connected count is reported as *unknown*
-  rather than zero, so the Bluetooth hypothesis is never wrongly exonerated by a count that could not have
-  seen the device. Full coverage needs the WinRT `BluetoothLEDevice` APIs.
-- **DPC time names a layer, not a driver.** OneLag can say a driver is stalling the machine. It cannot say
-  which `.sys` file. That requires an ETW trace.
 - **Dock state is derived, not read.** It is inferred from display topology, wired-network state, and power
   source. A dock with no display attached and no Ethernet will read as undocked.
+- **Driver attribution needs administrator rights** and a system-wide kernel logger session. Without
+  elevation it says so rather than returning an empty result.
+- **Routine addresses in unloaded or dynamically relocated images resolve to `unresolved`** and are excluded
+  from the ranking rather than guessed at.
 
 ## Still Open
 
-- Real Windows 11 laptop validation of the DPC, display-topology, Bluetooth, and shell probes. All of the
-  new Windows code degrades to an explicit `unavailable` evidence state rather than failing, but none of it
-  has been observed against real hardware yet.
-- Naming the offending driver. OneLag can now say *a driver is stalling this machine* and *the lag tracks the
-  dock*. Saying *it is this .sys file* still requires an ETW trace, which is the next real capability.
+- Real Windows 11 laptop validation of the DPC, driver-trace, display-topology, Bluetooth, and shell probes.
+  All of the new Windows code degrades to an explicit `unavailable` evidence state rather than failing, but
+  none of it has been observed against real hardware yet.
