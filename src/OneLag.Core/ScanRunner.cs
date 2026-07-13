@@ -23,6 +23,13 @@ public sealed class ScanRunner
         var pressure = platformProbe.CaptureSystemPressure();
         var clientHealth = platformProbe.CaptureOneDriveClientHealth(roots, telemetry);
         var eventLogs = platformProbe.ReadRecentEventSummaries(started.AddMinutes(-10));
+        var hostContext = platformProbe.CaptureHostContext();
+        var shell = platformProbe.CaptureShellResponsiveness();
+
+        // Kernel tracing is opt-in and elevation-gated, so it never runs unless explicitly asked for.
+        var driverLatency = options.DriverTraceDuration is { } traceDuration
+            ? platformProbe.CaptureDriverLatency(traceDuration, cancellationToken)
+            : null;
 
         var inventories = new List<InventorySummary>();
         foreach (var root in roots)
@@ -31,8 +38,24 @@ public sealed class ScanRunner
             inventories.Add(inventoryScanner.Scan(root.Path, options.MaxItems, cancellationToken));
         }
 
-        var (diagnosis, findings, recommendations) = riskEngine.Analyze(inventories, telemetry, pressure, clientHealth, eventLogs);
-        return new DiagnosticReport(started, DateTimeOffset.UtcNow, roots, inventories, telemetry, pressure, clientHealth, eventLogs, diagnosis, findings, recommendations);
+        var analysis = riskEngine.Analyze(inventories, telemetry, pressure, clientHealth, eventLogs, hostContext, shell, driverLatency);
+        return new DiagnosticReport(
+            started,
+            DateTimeOffset.UtcNow,
+            roots,
+            inventories,
+            telemetry,
+            pressure,
+            clientHealth,
+            eventLogs,
+            analysis.Diagnosis,
+            analysis.Findings,
+            analysis.Recommendations,
+            hostContext,
+            shell,
+            analysis.Hypotheses,
+            analysis.EvidenceQuality,
+            driverLatency);
     }
 
     private static IReadOnlyList<RootCandidate> ResolveRoots(IReadOnlyList<string> requestedRoots, IReadOnlyList<RootCandidate> discoveredRoots)

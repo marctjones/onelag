@@ -13,6 +13,16 @@ public interface IPlatformProbe
     IReadOnlyList<EventLogSummary> ReadRecentEventSummaries(DateTimeOffset since);
 
     string? GetForegroundProcessName();
+
+    HostContext CaptureHostContext();
+
+    ShellResponsiveness CaptureShellResponsiveness();
+
+    /// <summary>
+    /// Runs a bounded kernel trace and attributes DPC/ISR time to driver images. Heavy and elevation-gated,
+    /// so it is never part of the default scan path.
+    /// </summary>
+    DriverLatencyAttribution CaptureDriverLatency(TimeSpan duration, CancellationToken cancellationToken);
 }
 
 public class PortablePlatformProbe : IPlatformProbe
@@ -79,6 +89,23 @@ public class PortablePlatformProbe : IPlatformProbe
     }
 
     public virtual string? GetForegroundProcessName() => null;
+
+    public virtual HostContext CaptureHostContext()
+    {
+        return HostContext.Unavailable("unavailable-on-this-platform");
+    }
+
+    public virtual ShellResponsiveness CaptureShellResponsiveness()
+    {
+        return ShellResponsiveness.Unavailable("unavailable-on-this-platform");
+    }
+
+    public virtual DriverLatencyAttribution CaptureDriverLatency(TimeSpan duration, CancellationToken cancellationToken)
+    {
+        _ = duration;
+        _ = cancellationToken;
+        return DriverLatencyAttribution.Unavailable("unavailable-on-this-platform");
+    }
 
     private static void AddEnvironmentRoot(Dictionary<string, RootCandidate> roots, string variableName, string accountKind)
     {

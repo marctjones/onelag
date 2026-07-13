@@ -37,6 +37,9 @@ internal static class Program
         var service = new WatchService();
         _ = service.BuildReport(Array.Empty<WatchSample>(), Array.Empty<WatchMarker>());
         _ = new LocalReportViewService();
+        _ = new SessionComparisonService(service);
+        _ = new SelfTestService(new WindowsPlatformProbe());
+        _ = new LogCollectionService();
         return 0;
     }
 }
@@ -84,9 +87,13 @@ internal sealed class TrayApplicationContext : ApplicationContext
     {
         var menu = new ContextMenuStrip();
         menu.Items.Add("Show Dashboard", null, (_, _) => ShowDashboard());
+        menu.Items.Add("Self Test", null, async (_, _) => await mainForm.RunSelfTestFromTrayAsync());
+        menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Start Watch", null, async (_, _) => await mainForm.StartWatchFromTrayAsync());
         menu.Items.Add("Stop Watch", null, (_, _) => mainForm.RequestStopWatch());
         menu.Items.Add("Mark Lag Now", null, (_, _) => mainForm.MarkLagFromTray());
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("Collect Logs", null, async (_, _) => await mainForm.CollectLogsFromTrayAsync());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, (_, _) => ExitApplication());
         return menu;
@@ -138,6 +145,22 @@ internal sealed class MainForm : Form
     private readonly TextBox remediationDestinationBox = new();
     private readonly TextBox remediationOutputBox = new() { Text = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "onelag-move-plan") };
     private readonly CheckBox acknowledgeMoveBox = new() { Text = "I understand this moves files", AutoSize = true };
+    private readonly Panel readinessBanner = new() { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink };
+    private readonly Label readinessLabel = new() { Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(12, 8, 12, 8) };
+    private readonly Label selfTestSummaryLabel = new() { AutoSize = true, Dock = DockStyle.Top, Padding = new Padding(0, 0, 0, 8) };
+    private readonly TextBox collectOutputBox = new() { Text = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), $"onelag-logs-{DateTime.Now:yyyyMMdd-HHmmss}") };
+    private readonly NumericUpDown collectHoursBox = new() { Minimum = 1, Maximum = 168, Value = 48 };
+    private readonly NumericUpDown collectMaxTotalBox = new() { Minimum = 16, Maximum = 20_480, Value = 2_048, Increment = 256 };
+    private readonly CheckBox collectAllChannelsBox = new() { Text = "All event channels", AutoSize = true };
+    private readonly CheckBox collectZipBox = new() { Text = "Zip bundle", AutoSize = true, Checked = true };
+    private readonly CheckBox collectWindowsTreeBox = new() { Text = "Windows log tree", AutoSize = true, Checked = true };
+    private readonly CheckBox collectOverwriteBox = new() { Text = "Overwrite", AutoSize = true };
+    private readonly TextBox compareSessionABox = new() { Text = WatchService.GetDefaultDirectory() };
+    private readonly TextBox compareSessionBBox = new();
+    private readonly TextBox compareOutputBox = new() { Text = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "onelag-comparison.md") };
+    // A dark neutral so the white banner text has contrast from the first paint, before the self-test
+    // returns. If the self-test throws, the banner stays readable rather than white-on-light-gray.
+    private Color readinessColor = Color.FromArgb(70, 70, 70);
     private CancellationTokenSource? watchCancellation;
     private Task? watchTask;
 
@@ -154,6 +177,10 @@ internal sealed class MainForm : Form
         BuildUi();
         ApplySystemTheme();
         SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
+
+        // Tell a non-CLI user immediately whether this machine can measure anything, before they invest a day
+        // recording a watch session whose collectors were all dead.
+        _ = RunSelfTestAsync(startup: true);
     }
 
     public async Task StartWatchFromTrayAsync()
@@ -223,8 +250,11 @@ internal sealed class MainForm : Form
     private void BuildUi()
     {
         var tabs = new TabControl { Dock = DockStyle.Fill };
+        tabs.TabPages.Add(BuildDiagnoseTab());
         tabs.TabPages.Add(BuildScanTab());
         tabs.TabPages.Add(BuildWatchTab());
+        tabs.TabPages.Add(BuildCollectTab());
+        tabs.TabPages.Add(BuildCompareTab());
         tabs.TabPages.Add(BuildReportTab());
         tabs.TabPages.Add(BuildSupportTab());
         tabs.TabPages.Add(BuildRemediationTab());
@@ -237,7 +267,62 @@ internal sealed class MainForm : Form
         };
         split.Panel1.Controls.Add(tabs);
         split.Panel2.Controls.Add(logBox);
+
+        readinessLabel.Text = "Checking whether this machine can measure anything...";
+        readinessBanner.Controls.Add(readinessLabel);
+
+        // The Fill control is added before the Top banner so the banner sits above it and the split fills the
+        // remainder.
         Controls.Add(split);
+        Controls.Add(readinessBanner);
+    }
+
+    private TabPage BuildDiagnoseTab()
+    {
+        var page = new TabPage("Diagnose");
+        var layout = CreateTable(3);
+        selfTestSummaryLabel.Text = "Run a self test to see which probes are measuring live data on this machine.";
+        AddCommandRow(layout, selfTestSummaryLabel);
+
+        var selfTestButton = new Button { Text = "Run Self Test", AutoSize = true };
+        selfTestButton.Click += async (_, _) => await RunSelfTestAsync();
+        AddCommandRow(layout, selfTestButton);
+
+        page.Controls.Add(layout);
+        return page;
+    }
+
+    private TabPage BuildCollectTab()
+    {
+        var page = new TabPage("Collect Logs");
+        var layout = CreateTable(6);
+        AddRow(layout, "Bundle output", collectOutputBox, BrowseFolderButton(collectOutputBox));
+        AddRow(layout, "Event window (h)", collectHoursBox);
+        AddRow(layout, "Max total (MB)", collectMaxTotalBox);
+        AddCommandRow(layout, collectWindowsTreeBox, collectAllChannelsBox, collectZipBox, collectOverwriteBox);
+
+        var collectButton = new Button { Text = "Collect Logs", AutoSize = true };
+        collectButton.Click += async (_, _) => await RunCollectAsync();
+        AddCommandRow(layout, collectButton);
+
+        page.Controls.Add(layout);
+        return page;
+    }
+
+    private TabPage BuildCompareTab()
+    {
+        var page = new TabPage("Compare");
+        var layout = CreateTable(4);
+        AddRow(layout, "Session A", compareSessionABox, BrowseFolderButton(compareSessionABox));
+        AddRow(layout, "Session B", compareSessionBBox, BrowseFolderButton(compareSessionBBox));
+        AddRow(layout, "Report", compareOutputBox, SaveFileButton(compareOutputBox, "Markdown report|*.md"));
+
+        var compareButton = new Button { Text = "Compare Sessions", AutoSize = true };
+        compareButton.Click += (_, _) => RunCompare();
+        AddCommandRow(layout, compareButton);
+
+        page.Controls.Add(layout);
+        return page;
     }
 
     private TabPage BuildScanTab()
@@ -249,9 +334,232 @@ internal sealed class MainForm : Form
         AddRow(layout, "Max items", scanMaxItemsBox);
         var runButton = new Button { Text = "Run Scan", AutoSize = true };
         runButton.Click += async (_, _) => await RunScanAsync();
-        AddCommandRow(layout, runButton);
+        var traceButton = new Button { Text = "Trace Drivers (30s)", AutoSize = true };
+        traceButton.Click += async (_, _) => await RunDriverTraceAsync();
+        AddCommandRow(layout, runButton, traceButton);
         page.Controls.Add(layout);
         return page;
+    }
+
+    /// <summary>
+    /// Names the driver holding the CPU at high IRQL. Needs administrator rights, so it says so plainly
+    /// rather than returning an empty result.
+    /// </summary>
+    private async Task RunDriverTraceAsync()
+    {
+        try
+        {
+            Log("Tracing kernel DPC and ISR activity for 30s. Reproduce the lag now: move the mouse, drag a window.");
+
+            var attribution = await Task.Run(() => new WindowsPlatformProbe()
+                .CaptureDriverLatency(TimeSpan.FromSeconds(30), CancellationToken.None));
+
+            if (attribution.EvidenceState == "requires-administrator")
+            {
+                Log("A kernel trace needs administrator rights. Restart OneLag as administrator and try again.");
+                return;
+            }
+
+            var drivers = DriverClassifier.Significant(attribution);
+            if (drivers.Count == 0)
+            {
+                Log("No driver accumulated meaningful high-IRQL time during the trace window.");
+                return;
+            }
+
+            foreach (var driver in drivers.Take(5))
+            {
+                var subsystem = DriverClassifier.Classify(driver.Driver).Subsystem ?? "unclassified";
+                Log($"Driver {driver.Driver}: {driver.TotalMilliseconds:N1} ms {driver.Kind.ToUpperInvariant()} total, worst {driver.MaxMilliseconds:N2} ms ({subsystem})");
+            }
+        }
+        catch (Exception ex)
+        {
+            ShowError(ex);
+        }
+    }
+
+    /// <summary>
+    /// Runs every probe once and reports which ones measured live data. On startup it only updates the
+    /// banner; run explicitly, it also writes each probe's result to the log.
+    /// </summary>
+    private async Task RunSelfTestAsync(bool startup = false)
+    {
+        try
+        {
+            if (!startup)
+            {
+                Log("Running self test...");
+            }
+
+            var report = await Task.Run(() => new SelfTestService(new WindowsPlatformProbe()).Run());
+            UpdateReadiness(report);
+
+            if (!startup)
+            {
+                foreach (var probe in report.Probes)
+                {
+                    var marker = probe.Status switch
+                    {
+                        ProbeStatus.Live => "OK",
+                        ProbeStatus.Degraded => "WARN",
+                        _ => "FAIL"
+                    };
+                    Log($"  [{marker}] {probe.Probe}: {probe.Detail}");
+                }
+
+                Log($"Evidence quality: {report.Quality.Grade} ({report.Quality.Score}/100)");
+            }
+        }
+        catch (Exception ex)
+        {
+            ShowError(ex);
+        }
+    }
+
+    private void UpdateReadiness(SelfTestReport report)
+    {
+        var live = report.Probes.Count(probe => probe.Status == ProbeStatus.Live);
+        var total = report.Probes.Count;
+
+        string banner;
+        string detail;
+        if (report.ReadyToDiagnose)
+        {
+            readinessColor = Color.FromArgb(30, 110, 60);
+            banner = $"Ready to diagnose  —  {live}/{total} probes live, evidence {report.Quality.Grade}";
+            detail = "This machine is instrumented well enough to record a watch session.";
+        }
+        else if (live > 0)
+        {
+            readinessColor = Color.FromArgb(150, 110, 20);
+            banner = $"Partly instrumented  —  {live}/{total} probes live";
+            detail = "Some evidence is missing. Run OneLag as administrator, then run the self test again. A session recorded now would be incomplete.";
+        }
+        else
+        {
+            readinessColor = Color.FromArgb(150, 40, 40);
+            banner = "Not measuring anything  —  every probe is unavailable";
+            detail = "A watch session recorded now would be empty. Run OneLag as administrator on a Windows 11 machine, then run the self test again.";
+        }
+
+        readinessBanner.BackColor = readinessColor;
+        readinessLabel.BackColor = readinessColor;
+        readinessLabel.ForeColor = Color.White;
+        readinessLabel.Text = banner;
+        selfTestSummaryLabel.Text = $"{banner}.{Environment.NewLine}{detail}";
+    }
+
+    /// <summary>
+    /// Collects the raw log files off this machine into one bundle. Raw and unredacted by design; the bundle
+    /// carries its own privacy notice.
+    /// </summary>
+    private async Task RunCollectAsync()
+    {
+        try
+        {
+            var scope = new LogCollectionScope(
+                TimeSpan.FromHours((double)collectHoursBox.Value),
+                IncludeWindowsTree: collectWindowsTreeBox.Checked,
+                AllEventChannels: collectAllChannelsBox.Checked);
+
+            var options = new LogCollectionOptions(
+                collectOutputBox.Text,
+                MaxTotalBytes: (long)collectMaxTotalBox.Value * 1024 * 1024,
+                Zip: collectZipBox.Checked,
+                Overwrite: collectOverwriteBox.Checked);
+
+            Log($"Collecting logs (last {collectHoursBox.Value:N0}h of events). This can take a minute...");
+
+            var result = await Task.Run(() =>
+            {
+                var items = new WindowsLogCollector().Enumerate(scope, DateTimeOffset.UtcNow);
+                return new LogCollectionService().Collect(options, items, DateTimeOffset.UtcNow);
+            });
+
+            Log($"Collected {result.Collected:N0} file(s), {result.TotalBytes / 1024.0 / 1024.0:N1} MB.");
+            if (result.Skipped > 0)
+            {
+                Log($"  Skipped {result.Skipped:N0} over-cap or oversize item(s); see manifest.json.");
+            }
+
+            if (result.Errors > 0)
+            {
+                Log($"  {result.Errors:N0} file(s) were locked or access-denied; see manifest.json.");
+            }
+
+            Log(result.ZipPath is not null
+                ? $"Bundle: {result.ZipPath} (raw and unredacted; read PRIVACY.txt before sharing)"
+                : $"Bundle directory: {result.Directory} (raw and unredacted; read PRIVACY.txt before sharing)");
+        }
+        catch (Exception ex)
+        {
+            ShowError(ex);
+        }
+    }
+
+    private void RunCompare()
+    {
+        try
+        {
+            var sessions = new[] { compareSessionABox.Text, compareSessionBBox.Text }
+                .Where(session => !string.IsNullOrWhiteSpace(session))
+                .ToArray();
+
+            if (sessions.Length < 2)
+            {
+                MessageBox.Show(this, "Choose two watch session directories to compare, for example a docked day and an undocked day.", "OneLag", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            var service = new SessionComparisonService(watchService);
+            var comparison = service.Compare(sessions);
+            var report = service.BuildReport(comparison);
+
+            var output = Path.GetFullPath(compareOutputBox.Text);
+            Directory.CreateDirectory(Path.GetDirectoryName(output) ?? Environment.CurrentDirectory);
+            File.WriteAllText(output, report);
+            reportPathBox.Text = output;
+
+            foreach (var session in comparison.Sessions)
+            {
+                Log($"{session.Name}: {session.Samples:N0} samples, {session.Episodes:N0} episodes, max drift {session.MaxTimerDriftMilliseconds:N0} ms");
+            }
+
+            if (!string.IsNullOrWhiteSpace(comparison.Correlation.Conclusion))
+            {
+                Log(comparison.Correlation.Conclusion);
+            }
+
+            Log($"Comparison report written: {output}");
+        }
+        catch (Exception ex)
+        {
+            ShowError(ex);
+        }
+    }
+
+    public async Task RunSelfTestFromTrayAsync()
+    {
+        ShowFromTray();
+        await RunSelfTestAsync();
+    }
+
+    public async Task CollectLogsFromTrayAsync()
+    {
+        ShowFromTray();
+        await RunCollectAsync();
+    }
+
+    private void ShowFromTray()
+    {
+        if (!Visible)
+        {
+            Show();
+        }
+
+        WindowState = FormWindowState.Normal;
+        Activate();
     }
 
     private TabPage BuildSupportTab()
@@ -343,19 +651,33 @@ internal sealed class MainForm : Form
         {
             var output = Path.GetFullPath(scanOutputBox.Text);
             var roots = string.IsNullOrWhiteSpace(scanRootBox.Text) ? Array.Empty<string>() : new[] { scanRootBox.Text };
-            await Task.Run(() =>
+            var report = await Task.Run(() =>
             {
                 var platform = new WindowsPlatformProbe();
-                var report = new ScanRunner(platform, new InventoryScanner(), new RiskEngine()).Run(
+                var result = new ScanRunner(platform, new InventoryScanner(), new RiskEngine()).Run(
                     new ScanOptions(roots, output, "markdown", FullPaths: false, (int)scanMaxItemsBox.Value),
                     CancellationToken.None);
-                var redactor = new Redactor(fullPaths: false, report.Roots.Select(root => root.Path));
+                var redactor = new Redactor(fullPaths: false, result.Roots.Select(root => root.Path));
                 Directory.CreateDirectory(Path.GetDirectoryName(output) ?? Environment.CurrentDirectory);
-                File.WriteAllText(output, ReportWriter.ToMarkdown(report, redactor));
+                File.WriteAllText(output, ReportWriter.ToMarkdown(result, redactor));
+                return result;
             });
 
             reportPathBox.Text = output;
             bundleReportPathBox.Text = output;
+
+            if (report.EvidenceQuality is { } quality)
+            {
+                Log($"Evidence quality: {quality.Grade} ({quality.Score}/100). {quality.Summary}");
+            }
+
+            foreach (var hypothesis in (report.Hypotheses ?? Array.Empty<Hypothesis>())
+                .Where(candidate => candidate.Verdict is HypothesisVerdict.Possible or HypothesisVerdict.Likely or HypothesisVerdict.StronglySupported)
+                .Take(3))
+            {
+                Log($"Cause: {hypothesis.Kind} - {hypothesis.Verdict} (score {hypothesis.Score}). Next: {hypothesis.NextStep}");
+            }
+
             Log($"Scan report written: {output}");
         }
         catch (Exception ex)
@@ -602,10 +924,20 @@ internal sealed class MainForm : Form
         reportList.ForeColor = SystemColors.WindowText;
         logBox.BackColor = SystemColors.Window;
         logBox.ForeColor = SystemColors.WindowText;
+
+        // The readiness banner is a semantic status indicator, so its colour survives the theme sweep.
+        readinessBanner.BackColor = readinessColor;
+        readinessLabel.BackColor = readinessColor;
+        readinessLabel.ForeColor = Color.White;
     }
 
-    private static void ApplySystemColors(Control control)
+    private void ApplySystemColors(Control control)
     {
+        if (ReferenceEquals(control, readinessBanner))
+        {
+            return;
+        }
+
         if (control is TextBoxBase or ListView)
         {
             control.BackColor = SystemColors.Window;

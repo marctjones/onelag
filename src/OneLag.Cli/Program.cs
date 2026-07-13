@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using OneLag.Core;
@@ -44,6 +45,10 @@ internal static class Program
             {
                 "scan" => RunScan(args[1..], cancellation.Token),
                 "watch" => await RunWatch(args[1..], cancellation.Token),
+                "trace" => RunTrace(args[1..], cancellation.Token),
+                "compare" => RunCompare(args[1..]),
+                "collect" => RunCollect(args[1..]),
+                "selftest" => RunSelfTest(),
                 "repair" => RunRepair(args[1..]),
                 "support" => RunSupport(args[1..]),
                 "remediate" => RunRemediate(args[1..], cancellation.Token),
@@ -72,11 +77,15 @@ internal static class Program
         var format = "markdown";
         var fullPaths = false;
         var maxItems = 500_000;
+        TimeSpan? traceDrivers = null;
 
         for (var i = 0; i < args.Length; i++)
         {
             switch (args[i])
             {
+                case "--trace-drivers":
+                    traceDrivers = ParseDuration(RequireValue(args, ref i, "--trace-drivers"));
+                    break;
                 case "--root":
                     roots.Add(RequireValue(args, ref i, "--root"));
                     break;
@@ -110,7 +119,13 @@ internal static class Program
 
         var platform = new WindowsPlatformProbe();
         var runner = new ScanRunner(platform, new InventoryScanner(), new RiskEngine());
-        var options = new ScanOptions(roots, output, format, fullPaths, maxItems);
+        var options = new ScanOptions(roots, output, format, fullPaths, maxItems, traceDrivers);
+
+        if (traceDrivers is { } traceWindow)
+        {
+            Console.WriteLine($"Tracing kernel DPC and ISR activity for {traceWindow}. Reproduce the lag now.");
+        }
+
         var report = runner.Run(options, cancellationToken);
         var redactor = new Redactor(fullPaths, report.Roots.Select(root => root.Path));
 
@@ -121,6 +136,17 @@ internal static class Program
         var outputPath = Path.GetFullPath(output);
         Directory.CreateDirectory(Path.GetDirectoryName(outputPath) ?? Environment.CurrentDirectory);
         File.WriteAllText(outputPath, text);
+
+        if (report.EvidenceQuality is { } quality)
+        {
+            Console.WriteLine($"Evidence quality: {quality.Grade} ({quality.Score}/100)");
+        }
+
+        var topCause = report.Hypotheses?.FirstOrDefault();
+        if (topCause is not null && topCause.Verdict is not (HypothesisVerdict.NotSupported or HypothesisVerdict.Unknown))
+        {
+            Console.WriteLine($"Top cause: {topCause.Kind} ({topCause.Verdict}, score {topCause.Score})");
+        }
 
         Console.WriteLine($"Diagnosis: {report.Diagnosis}");
         Console.WriteLine($"Findings: {report.Findings.Count}");
@@ -145,6 +171,317 @@ internal static class Program
             "report" => WatchReport(args[1..]),
             _ => UnknownCommand($"watch {args[0]}")
         };
+    }
+
+    /// <summary>
+    /// Reports which probes actually measured something. Run this before recording a watch session: a session
+    /// whose collectors were all degraded produces an authoritative-looking report containing nothing.
+    /// </summary>
+    private static int RunSelfTest()
+    {
+        var report = new SelfTestService(new WindowsPlatformProbe()).Run();
+
+        Console.WriteLine("OneLag self test");
+        Console.WriteLine();
+
+        foreach (var probe in report.Probes)
+        {
+            var marker = probe.Status switch
+            {
+                ProbeStatus.Live => "OK  ",
+                ProbeStatus.Degraded => "WARN",
+                _ => "FAIL"
+            };
+
+            Console.WriteLine($"[{marker}] {probe.Probe,-22} {probe.Detail}");
+            Console.WriteLine($"       {probe.EvidenceState}");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine($"Evidence quality: {report.Quality.Grade} ({report.Quality.Score}/100)");
+
+        foreach (var gap in report.Quality.Gaps)
+        {
+            Console.WriteLine($"  - {gap}");
+        }
+
+        Console.WriteLine();
+
+        if (report.ReadyToDiagnose)
+        {
+            Console.WriteLine("This machine is instrumented well enough to record a watch session.");
+            Console.WriteLine("Next: onelag watch start --duration 8h --output docked-day");
+            return 0;
+        }
+
+        Console.WriteLine("Too many probes are degraded for a watch session to be worth recording.");
+        Console.WriteLine("Fix the FAIL lines above first; a session recorded now would produce an empty report.");
+        return 1;
+    }
+
+    /// <summary>
+    /// Collects the actual log files off this machine into one bundle, so analysis runs over real bytes
+    /// instead of guesswork: every OneDrive `.odl`, the `.log` files under the Windows tree, crash dumps, and
+    /// the recent event logs. Raw and unredacted by design; bounded by size and count caps that record what
+    /// they dropped.
+    /// </summary>
+    private static int RunCollect(string[] args)
+    {
+        var output = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            $"onelag-logs-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}");
+        var hours = 48.0;
+        var maxTotalMb = 2048L;
+        var maxFileMb = 100L;
+        var zip = true;
+        var overwrite = false;
+        var allChannels = false;
+        var includeWindowsTree = true;
+
+        for (var i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--output":
+                case "-o":
+                    output = RequireValue(args, ref i, args[i]);
+                    break;
+                case "--hours":
+                    hours = double.Parse(RequireValue(args, ref i, "--hours"), CultureInfo.InvariantCulture);
+                    break;
+                case "--max-total-mb":
+                    maxTotalMb = long.Parse(RequireValue(args, ref i, "--max-total-mb"), CultureInfo.InvariantCulture);
+                    break;
+                case "--max-file-mb":
+                    maxFileMb = long.Parse(RequireValue(args, ref i, "--max-file-mb"), CultureInfo.InvariantCulture);
+                    break;
+                case "--all-channels":
+                    allChannels = true;
+                    break;
+                case "--no-windows-tree":
+                    includeWindowsTree = false;
+                    break;
+                case "--no-zip":
+                    zip = false;
+                    break;
+                case "--overwrite":
+                    overwrite = true;
+                    break;
+                default:
+                    throw new ArgumentException($"Unknown collect argument '{args[i]}'.");
+            }
+        }
+
+        if (hours <= 0 || hours > 168)
+        {
+            throw new ArgumentException("--hours must be greater than zero and no more than 168 (7 days).");
+        }
+
+        var scope = new LogCollectionScope(
+            TimeSpan.FromHours(hours),
+            IncludeWindowsTree: includeWindowsTree,
+            AllEventChannels: allChannels);
+
+        var options = new LogCollectionOptions(
+            output,
+            MaxTotalBytes: maxTotalMb * 1024 * 1024,
+            MaxFileBytes: maxFileMb * 1024 * 1024,
+            Zip: zip,
+            Overwrite: overwrite);
+
+        Console.WriteLine($"Collecting logs (last {hours:N0}h of events, up to {maxTotalMb:N0} MB total).");
+        if (!OperatingSystem.IsWindows())
+        {
+            Console.Error.WriteLine("Note: not running on Windows, so no Windows logs exist to collect.");
+        }
+        else if (!IsElevated())
+        {
+            Console.WriteLine("Tip: some Windows logs and the Security event log need administrator rights. Re-run elevated for a complete bundle.");
+        }
+
+        var items = new WindowsLogCollector().Enumerate(scope, DateTimeOffset.UtcNow);
+        var result = new LogCollectionService().Collect(options, items, DateTimeOffset.UtcNow);
+
+        Console.WriteLine();
+        Console.WriteLine($"Collected: {result.Collected:N0} file(s), {result.TotalBytes / 1024.0 / 1024.0:N1} MB");
+        if (result.Skipped > 0)
+        {
+            Console.WriteLine($"Skipped (too large or over cap): {result.Skipped:N0}. See manifest.json.");
+        }
+
+        if (result.Errors > 0)
+        {
+            Console.WriteLine($"Unreadable: {result.Errors:N0} (locked or access-denied). See manifest.json.");
+        }
+
+        Console.WriteLine($"Manifest: {result.ManifestPath}");
+        if (result.ZipPath is not null)
+        {
+            Console.WriteLine($"Bundle: {result.ZipPath}");
+            Console.WriteLine("Pull this single .zip back for analysis. It is raw and unredacted; read PRIVACY.txt before sharing.");
+        }
+        else
+        {
+            Console.WriteLine($"Bundle directory: {result.Directory}");
+        }
+
+        return 0;
+    }
+
+    private static bool IsElevated()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return false;
+        }
+
+        try
+        {
+            using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+            return new System.Security.Principal.WindowsPrincipal(identity)
+                .IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private static int RunTrace(string[] args, CancellationToken cancellationToken)
+    {
+        if (args.Length == 0 || args[0] is "-h" or "--help" or "help")
+        {
+            PrintTraceHelp();
+            return 0;
+        }
+
+        return args[0].ToLowerInvariant() switch
+        {
+            "dpc" => RunTraceDpc(args[1..], cancellationToken),
+            _ => UnknownCommand($"trace {args[0]}")
+        };
+    }
+
+    private static int RunTraceDpc(string[] args, CancellationToken cancellationToken)
+    {
+        var duration = TimeSpan.FromSeconds(30);
+        var output = "onelag-driver-trace.md";
+
+        for (var i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--duration":
+                    duration = ParseDuration(RequireValue(args, ref i, "--duration"));
+                    break;
+                case "--output":
+                case "-o":
+                    output = RequireValue(args, ref i, args[i]);
+                    break;
+                default:
+                    throw new ArgumentException($"Unknown trace dpc argument '{args[i]}'.");
+            }
+        }
+
+        if (duration <= TimeSpan.Zero || duration > TimeSpan.FromMinutes(10))
+        {
+            throw new ArgumentException("--duration must be greater than zero and no more than 10m.");
+        }
+
+        if (!OperatingSystem.IsWindows())
+        {
+            Console.Error.WriteLine("Kernel tracing is only available on Windows.");
+            return 3;
+        }
+
+        Console.WriteLine($"Tracing kernel DPC and ISR activity for {duration}.");
+        Console.WriteLine("Reproduce the lag now: move the mouse, drag a window, use the machine as you normally would.");
+
+        var attribution = new WindowsPlatformProbe().CaptureDriverLatency(duration, cancellationToken);
+
+        if (attribution.EvidenceState == "requires-administrator")
+        {
+            Console.Error.WriteLine("A kernel trace needs an elevated terminal. Re-run this command from an administrator prompt.");
+            return 3;
+        }
+
+        var builder = new StringBuilder();
+        builder.AppendLine("# OneLag Driver Interrupt Trace");
+        builder.AppendLine();
+        builder.AppendLine($"- Started: `{attribution.StartedAt:O}`");
+        builder.AppendLine();
+        ReportWriter.AppendDriverLatency(builder, attribution);
+
+        var fullPath = Path.GetFullPath(output);
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath) ?? Environment.CurrentDirectory);
+        File.WriteAllText(fullPath, builder.ToString());
+
+        var significant = DriverClassifier.Significant(attribution);
+        if (significant.Count == 0)
+        {
+            Console.WriteLine("No driver accumulated meaningful high-IRQL time during the trace window.");
+        }
+        else
+        {
+            Console.WriteLine("Top drivers by time at high IRQL:");
+            foreach (var driver in significant.Take(5))
+            {
+                var subsystem = DriverClassifier.Classify(driver.Driver).Subsystem ?? "unclassified";
+                Console.WriteLine($"  {driver.Driver,-24} {driver.Kind,-4} {driver.TotalMilliseconds,8:N1} ms total, {driver.MaxMilliseconds,6:N2} ms worst  ({subsystem})");
+            }
+        }
+
+        Console.WriteLine($"Report: {fullPath}");
+        return 0;
+    }
+
+    private static int RunCompare(string[] args)
+    {
+        var sessions = new List<string>();
+        var output = "onelag-comparison.md";
+
+        for (var i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--session":
+                    sessions.Add(RequireValue(args, ref i, "--session"));
+                    break;
+                case "--output":
+                case "-o":
+                    output = RequireValue(args, ref i, args[i]);
+                    break;
+                default:
+                    throw new ArgumentException($"Unknown compare argument '{args[i]}'.");
+            }
+        }
+
+        if (sessions.Count < 2)
+        {
+            throw new ArgumentException("Provide at least two --session directories to compare, for example a docked session and an undocked session.");
+        }
+
+        var service = new SessionComparisonService(new WatchService());
+        var comparison = service.Compare(sessions);
+        var report = service.BuildReport(comparison);
+
+        var fullPath = Path.GetFullPath(output);
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath) ?? Environment.CurrentDirectory);
+        File.WriteAllText(fullPath, report);
+
+        foreach (var session in comparison.Sessions)
+        {
+            Console.WriteLine($"{session.Name}: {session.Samples:N0} samples, {session.Episodes:N0} episodes, max drift {session.MaxTimerDriftMilliseconds:N0} ms");
+        }
+
+        if (!string.IsNullOrWhiteSpace(comparison.Correlation.Conclusion))
+        {
+            Console.WriteLine();
+            Console.WriteLine(comparison.Correlation.Conclusion);
+        }
+
+        Console.WriteLine($"Report: {fullPath}");
+        return 0;
     }
 
     private static int RunRepair(string[] args)
@@ -904,12 +1241,16 @@ internal static class Program
         OneLag
 
         Commands:
-          scan [--root PATH] [--output PATH] [--format markdown|json] [--full-paths]
+          selftest                                          (which probes actually measure anything; run this first)
+          scan [--root PATH] [--output PATH] [--format markdown|json] [--full-paths] [--trace-drivers 30s]
           watch start [--duration 8h] [--interval 2s] [--output DIR]
           watch stop [--output DIR]
           watch status [--output DIR]
           watch mark [--output DIR] [--note TEXT]
           watch report [--output DIR] [--report PATH]
+          trace dpc [--duration 30s] [--output PATH]        (names the driver holding the CPU; needs admin)
+          compare --session DIR --session DIR [--output PATH] (docked vs undocked lag rates)
+          collect [--hours 48] [--output DIR] [--all-channels] [--max-total-mb 2048] [--zip] (pull raw logs)
           repair reset-onedrive [--execute --i-understand-reset-disconnects-sync]
           support trace-plan [--output DIR]
           support bundle --report PATH [--report PATH] [--watch-output DIR] [--output DIR] [--zip]
@@ -917,6 +1258,21 @@ internal static class Program
           view --report PATH [--timeline]
           interactive
           version
+        """);
+    }
+
+    private static void PrintTraceHelp()
+    {
+        Console.WriteLine("""
+        OneLag trace
+
+          trace dpc [--duration 30s] [--output PATH]
+
+        Runs a bounded kernel trace and attributes DPC and ISR time to the driver images
+        responsible for it. The performance counters can prove that a driver is holding a CPU
+        at high IRQL; only this can say which driver.
+
+        Requires an elevated (administrator) terminal. Reproduce the lag while it runs.
         """);
     }
 

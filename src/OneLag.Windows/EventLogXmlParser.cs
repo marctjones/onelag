@@ -54,7 +54,21 @@ internal static class EventLogXmlParser
             return null;
         }
 
-        var provider = Child(system, "Provider")?.Attribute("Name")?.Value;
+        // Manifest-based providers carry a Name. Classic and some kernel providers render only a Guid, and a
+        // provider reported as "unknown" is invisible to the display, storage, and Bluetooth event matching
+        // that the hypotheses depend on.
+        var providerElement = Child(system, "Provider");
+        var provider = providerElement?.Attribute("Name")?.Value;
+        if (string.IsNullOrWhiteSpace(provider))
+        {
+            provider = providerElement?.Attribute("EventSourceName")?.Value;
+        }
+
+        if (string.IsNullOrWhiteSpace(provider))
+        {
+            provider = providerElement?.Attribute("Guid")?.Value;
+        }
+
         var eventIdText = Child(system, "EventID")?.Value;
         if (!int.TryParse(eventIdText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var eventId))
         {

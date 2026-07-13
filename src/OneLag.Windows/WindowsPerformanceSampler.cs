@@ -15,7 +15,22 @@ internal static class WindowsPerformanceSampler
         new(@"\PhysicalDisk(_Total)\Avg. Disk Queue Length", "physical-disk-queue-length", "count"),
         new(@"\PhysicalDisk(_Total)\% Disk Time", "physical-disk-active-percent", "percent"),
         new(@"\PhysicalDisk(_Total)\Disk Bytes/sec", "physical-disk-bytes-per-second", "bytes-per-second"),
-        new(@"\Paging File(_Total)\% Usage", "paging-file-usage-percent", "percent")
+        new(@"\Paging File(_Total)\% Usage", "paging-file-usage-percent", "percent"),
+        new(@"\Processor(_Total)\% DPC Time", "processor-dpc-percent", "percent"),
+        new(@"\Processor(_Total)\% Interrupt Time", "processor-interrupt-percent", "percent"),
+        new(@"\Processor(_Total)\DPCs Queued/sec", "processor-dpcs-queued-per-second", "count-per-second"),
+        new(@"\Processor(_Total)\Interrupts/sec", "processor-interrupts-per-second", "count-per-second")
+    };
+
+    /// <summary>
+    /// A driver storm usually pins one core rather than spreading across all of them, and the _Total
+    /// instance averages that away. These read every core and keep the worst one, which is the number that
+    /// actually corresponds to a stalled desktop.
+    /// </summary>
+    private static readonly CounterDefinition[] PerCoreCounterDefinitions =
+    {
+        new(@"\Processor(*)\% DPC Time", "processor-dpc-percent-max-core", "percent"),
+        new(@"\Processor(*)\% Interrupt Time", "processor-interrupt-percent-max-core", "percent")
     };
 
     public static IReadOnlyList<ProcessSample> SampleProcessesByName(string processName)
@@ -197,11 +212,11 @@ internal static class WindowsPerformanceSampler
 
     private static IReadOnlyList<PerformanceSignal> CapturePdhSignals()
     {
+        var allDefinitions = CounterDefinitions.Concat(PerCoreCounterDefinitions).ToArray();
+
         if (!OperatingSystem.IsWindows())
         {
-            return CounterDefinitions
-                .Select(definition => new PerformanceSignal(definition.Kind, null, definition.Unit, "unavailable-on-this-platform"))
-                .ToArray();
+            return Unavailable(allDefinitions, "unavailable-on-this-platform");
         }
 
         uint status;
@@ -212,22 +227,20 @@ internal static class WindowsPerformanceSampler
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
         {
-            return CounterDefinitions
-                .Select(definition => new PerformanceSignal(definition.Kind, null, definition.Unit, "pdh-entrypoint-unavailable"))
-                .ToArray();
+            return Unavailable(allDefinitions, "pdh-entrypoint-unavailable");
         }
 
         if (status != ErrorSuccess)
         {
-            return CounterDefinitions
-                .Select(definition => new PerformanceSignal(definition.Kind, null, definition.Unit, $"pdh-open-failed-0x{status:X}"))
-                .ToArray();
+            return Unavailable(allDefinitions, $"pdh-open-failed-0x{status:X}");
         }
 
         try
         {
             var counters = new List<(CounterDefinition Definition, IntPtr Handle)>();
+            var perCoreCounters = new List<(CounterDefinition Definition, IntPtr Handle)>();
             var failed = new List<PerformanceSignal>();
+
             foreach (var definition in CounterDefinitions)
             {
                 var addStatus = PdhAddEnglishCounter(query, definition.Path, UIntPtr.Zero, out var counter);
@@ -241,11 +254,25 @@ internal static class WindowsPerformanceSampler
                 }
             }
 
-            if (counters.Count == 0)
+            foreach (var definition in PerCoreCounterDefinitions)
+            {
+                var addStatus = PdhAddEnglishCounter(query, definition.Path, UIntPtr.Zero, out var counter);
+                if (addStatus == ErrorSuccess)
+                {
+                    perCoreCounters.Add((definition, counter));
+                }
+                else
+                {
+                    failed.Add(new PerformanceSignal(definition.Kind, null, definition.Unit, $"pdh-counter-unavailable-0x{addStatus:X}"));
+                }
+            }
+
+            if (counters.Count == 0 && perCoreCounters.Count == 0)
             {
                 return failed;
             }
 
+            // Rate counters need two collections separated by a sample window before they yield a value.
             _ = PdhCollectQueryData(query);
             Thread.Sleep(DefaultSampleWindow);
             _ = PdhCollectQueryData(query);
@@ -254,7 +281,7 @@ internal static class WindowsPerformanceSampler
             foreach (var (definition, counter) in counters)
             {
                 var valueStatus = PdhGetFormattedCounterValue(counter, PdhFmtDouble, out _, out var value);
-                if (valueStatus == ErrorSuccess && value.CStatus == ErrorSuccess && double.IsFinite(value.DoubleValue))
+                if (valueStatus == ErrorSuccess && IsValidCounterStatus(value.CStatus) && double.IsFinite(value.DoubleValue))
                 {
                     signals.Add(new PerformanceSignal(definition.Kind, Math.Max(0, value.DoubleValue), definition.Unit, "pdh"));
                 }
@@ -264,12 +291,103 @@ internal static class WindowsPerformanceSampler
                 }
             }
 
+            foreach (var (definition, counter) in perCoreCounters)
+            {
+                signals.Add(ReadMaxAcrossInstances(definition, counter));
+            }
+
             return signals;
         }
         finally
         {
             _ = PdhCloseQuery(query);
         }
+    }
+
+    /// <summary>
+    /// Reads a wildcard counter across every instance and keeps the maximum, skipping the _Total instance
+    /// so the average never masks a single saturated core.
+    /// </summary>
+    private static PerformanceSignal ReadMaxAcrossInstances(CounterDefinition definition, IntPtr counter)
+    {
+        var buffer = IntPtr.Zero;
+        try
+        {
+            var bufferSize = 0u;
+            var itemCount = 0u;
+            var sizeStatus = PdhGetFormattedCounterArray(counter, PdhFmtDouble, ref bufferSize, ref itemCount, IntPtr.Zero);
+
+            if (sizeStatus != PdhMoreData || bufferSize == 0 || itemCount == 0)
+            {
+                return new PerformanceSignal(definition.Kind, null, definition.Unit, $"pdh-array-size-failed-0x{sizeStatus:X}");
+            }
+
+            buffer = Marshal.AllocHGlobal((int)bufferSize);
+
+            var readStatus = PdhGetFormattedCounterArray(counter, PdhFmtDouble, ref bufferSize, ref itemCount, buffer);
+            if (readStatus != ErrorSuccess)
+            {
+                return new PerformanceSignal(definition.Kind, null, definition.Unit, $"pdh-array-read-failed-0x{readStatus:X}");
+            }
+
+            var itemSize = Marshal.SizeOf<PdhFormattedCounterValueItem>();
+            double? max = null;
+
+            for (var index = 0; index < itemCount; index++)
+            {
+                var item = Marshal.PtrToStructure<PdhFormattedCounterValueItem>(buffer + (index * itemSize));
+                var name = item.Name == IntPtr.Zero ? string.Empty : Marshal.PtrToStringUni(item.Name) ?? string.Empty;
+
+                if (name.Equals("_Total", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (!IsValidCounterStatus(item.Value.CStatus) || !double.IsFinite(item.Value.DoubleValue))
+                {
+                    continue;
+                }
+
+                var value = Math.Max(0, item.Value.DoubleValue);
+                if (max is null || value > max)
+                {
+                    max = value;
+                }
+            }
+
+            return max.HasValue
+                ? new PerformanceSignal(definition.Kind, max.Value, definition.Unit, "pdh-per-instance-max")
+                : new PerformanceSignal(definition.Kind, null, definition.Unit, "pdh-no-instance-data");
+        }
+        catch (Exception ex) when (ex is EntryPointNotFoundException or DllNotFoundException or BadImageFormatException)
+        {
+            return new PerformanceSignal(definition.Kind, null, definition.Unit, "pdh-array-entrypoint-unavailable");
+        }
+        finally
+        {
+            if (buffer != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
+        }
+    }
+
+    /// <summary>
+    /// PDH_FMT_COUNTERVALUE.CStatus is a severity-coded status, not a boolean. Rate counters — which is
+    /// every counter sampled here — are documented to return PDH_CSTATUS_NEW_DATA (1) rather than
+    /// PDH_CSTATUS_VALID_DATA (0) when the raw value advanced between collections. Testing it for equality
+    /// with zero therefore discards exactly the samples that carry data.
+    /// </summary>
+    private static bool IsValidCounterStatus(uint status)
+    {
+        return (status & SeverityMask) == 0;
+    }
+
+    private static PerformanceSignal[] Unavailable(IEnumerable<CounterDefinition> definitions, string evidenceState)
+    {
+        return definitions
+            .Select(definition => new PerformanceSignal(definition.Kind, null, definition.Unit, evidenceState))
+            .ToArray();
     }
 
     private static IReadOnlyList<PerformanceSignal> CaptureMemorySignals()
@@ -332,6 +450,10 @@ internal static class WindowsPerformanceSampler
 
     private const uint ErrorSuccess = 0;
     private const uint PdhFmtDouble = 0x00000200;
+    private const uint PdhMoreData = 0x800007D2;
+
+    /// <summary>Error and warning severities occupy the top two bits of a PDH status code.</summary>
+    private const uint SeverityMask = 0xC0000000;
 
     [DllImport("pdh.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern uint PdhOpenQuery(string? dataSource, UIntPtr userData, out IntPtr query);
@@ -345,21 +467,36 @@ internal static class WindowsPerformanceSampler
     [DllImport("pdh.dll", SetLastError = true)]
     private static extern uint PdhGetFormattedCounterValue(IntPtr counter, uint format, out uint type, out PdhFormattedCounterValue value);
 
+    [DllImport("pdh.dll", EntryPoint = "PdhGetFormattedCounterArrayW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint PdhGetFormattedCounterArray(
+        IntPtr counter,
+        uint format,
+        ref uint bufferSize,
+        ref uint itemCount,
+        IntPtr itemBuffer);
+
     [DllImport("pdh.dll", SetLastError = true)]
     private static extern uint PdhCloseQuery(IntPtr query);
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct PdhFormattedCounterValue
+    internal struct PdhFormattedCounterValue
     {
         public uint CStatus;
         public double DoubleValue;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct PdhFormattedCounterValueItem
+    {
+        public IntPtr Name;
+        public PdhFormattedCounterValue Value;
     }
 
     [DllImport("psapi.dll", SetLastError = true)]
     private static extern bool GetPerformanceInfo(out PerformanceInformation performanceInformation, int size);
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct PerformanceInformation
+    internal struct PerformanceInformation
     {
         public int Size;
         public UIntPtr CommitTotal;
@@ -381,7 +518,7 @@ internal static class WindowsPerformanceSampler
     private static extern bool GetSystemPowerStatus(out SystemPowerStatus systemPowerStatus);
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct SystemPowerStatus
+    internal struct SystemPowerStatus
     {
         public byte ACLineStatus;
         public byte BatteryFlag;

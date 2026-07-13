@@ -39,9 +39,50 @@ public enum EpisodeCategory
     CpuStarvation,
     MemoryPaging,
     DriverOrDpcSuspected,
+    DisplayOrDockSuspected,
+    InputOrBluetoothSuspected,
+    ShellBlocked,
     ForegroundAppBlocked,
     OneDrivePossible,
     Unknown
+}
+
+/// <summary>
+/// Candidate causes of desktop lag. OneDrive is one hypothesis among several, not the default.
+/// </summary>
+public enum HypothesisKind
+{
+    OneDriveSync,
+    StorageSaturation,
+    CpuContention,
+    MemoryPaging,
+    DriverInterruptLatency,
+    DisplayOrDockPipeline,
+    BluetoothOrInputRadio,
+    ShellExtensionBlocking,
+    SecurityOrSearchScanner,
+    ThermalOrPowerThrottling
+}
+
+public enum HypothesisVerdict
+{
+    RuledOut,
+    NotSupported,
+    Possible,
+    Likely,
+    StronglySupported,
+    Unknown
+}
+
+/// <summary>
+/// How much of the evidence a verdict depends on was actually collectable. A verdict built on an
+/// insufficient snapshot must not be presented with the same weight as one built on live evidence.
+/// </summary>
+public enum EvidenceGrade
+{
+    Insufficient,
+    Partial,
+    Complete
 }
 
 public sealed record RootCandidate(
@@ -55,7 +96,8 @@ public sealed record ScanOptions(
     string OutputPath,
     string Format,
     bool FullPaths,
-    int MaxItems = 500_000);
+    int MaxItems = 500_000,
+    TimeSpan? DriverTraceDuration = null);
 
 public sealed record DirectoryRisk(
     string Path,
@@ -135,6 +177,120 @@ public sealed record SystemPressureSnapshot(
     IReadOnlyList<PerformanceSignal>? Signals = null,
     IReadOnlyList<ProcessPressureSample>? TopProcessSamples = null);
 
+public sealed record DisplayInfo(
+    string Name,
+    string OutputTechnology,
+    bool IsInternal,
+    bool IsIndirect,
+    int Width,
+    int Height,
+    double RefreshHz);
+
+/// <summary>
+/// The machine's physical environment at sample time: what is plugged in, what radios are live, and
+/// whether the laptop is docked. Lag that only appears in one of these configurations is a hardware or
+/// driver problem, not a sync problem, and no amount of OneDrive inventory will show that.
+/// </summary>
+public sealed record HostContext(
+    DateTimeOffset Timestamp,
+    int DisplayCount,
+    int ExternalDisplayCount,
+    int IndirectDisplayCount,
+    IReadOnlyList<DisplayInfo> Displays,
+    bool? BluetoothRadioPresent,
+    bool? BluetoothRadioEnabled,
+    int? ConnectedBluetoothDevices,
+    string PowerSource,
+    bool? WiredNetworkUp,
+    IReadOnlyList<string> IndirectDisplayDrivers,
+    string DockState,
+    string EvidenceState)
+{
+    public static HostContext Unavailable(string evidenceState) => new(
+        DateTimeOffset.UtcNow,
+        0,
+        0,
+        0,
+        Array.Empty<DisplayInfo>(),
+        null,
+        null,
+        null,
+        "unknown",
+        null,
+        Array.Empty<string>(),
+        DockStates.Unknown,
+        evidenceState);
+}
+
+public static class DockStates
+{
+    public const string DockedLikely = "docked-likely";
+    public const string UndockedLikely = "undocked-likely";
+    public const string Unknown = "unknown";
+}
+
+/// <summary>
+/// Direct measurement of whether the Explorer shell is blocked. The source guide's core failure mode is a
+/// stalled sync-status query blocking Explorer, which OneLag previously inferred but never tested.
+/// </summary>
+public sealed record ShellResponsiveness(
+    DateTimeOffset Timestamp,
+    bool? ExplorerRunning,
+    bool? ShellWindowHung,
+    int HungTopLevelWindows,
+    double? ShellPumpLatencyMilliseconds,
+    string EvidenceState)
+{
+    public static ShellResponsiveness Unavailable(string evidenceState) => new(
+        DateTimeOffset.UtcNow,
+        null,
+        null,
+        0,
+        null,
+        evidenceState);
+}
+
+public sealed record DriverLatencySample(
+    string Driver,
+    string Kind,
+    double TotalMilliseconds,
+    double MaxMilliseconds,
+    long Count);
+
+/// <summary>
+/// Attribution of kernel DPC and ISR time to specific driver images.
+///
+/// The DPC counters can say that a driver is stalling the machine. Only a kernel trace can say which one.
+/// This is the difference between "escalate to WPR" and an answer.
+/// </summary>
+public sealed record DriverLatencyAttribution(
+    DateTimeOffset StartedAt,
+    TimeSpan Duration,
+    IReadOnlyList<DriverLatencySample> Drivers,
+    string EvidenceState)
+{
+    public static DriverLatencyAttribution Unavailable(string evidenceState) => new(
+        DateTimeOffset.UtcNow,
+        TimeSpan.Zero,
+        Array.Empty<DriverLatencySample>(),
+        evidenceState);
+}
+
+public sealed record Hypothesis(
+    HypothesisKind Kind,
+    HypothesisVerdict Verdict,
+    int Score,
+    string Summary,
+    IReadOnlyList<string> Supporting,
+    IReadOnlyList<string> Opposing,
+    string NextStep);
+
+public sealed record EvidenceQuality(
+    EvidenceGrade Grade,
+    int Score,
+    IReadOnlyList<string> Gaps,
+    string Summary);
+
 public sealed record EventLogSummary(
     string LogName,
     string Provider,
@@ -184,14 +340,21 @@ public sealed record DiagnosticReport(
     IReadOnlyList<EventLogSummary> EventLogs,
     DifferentialDiagnosis Diagnosis,
     IReadOnlyList<Finding> Findings,
-    IReadOnlyList<Recommendation> Recommendations);
+    IReadOnlyList<Recommendation> Recommendations,
+    HostContext? HostContext = null,
+    ShellResponsiveness? ShellResponsiveness = null,
+    IReadOnlyList<Hypothesis>? Hypotheses = null,
+    EvidenceQuality? EvidenceQuality = null,
+    DriverLatencyAttribution? DriverLatency = null);
 
 public sealed record WatchSample(
     DateTimeOffset Timestamp,
     double TimerDriftMilliseconds,
     TelemetrySnapshot Telemetry,
     SystemPressureSnapshot SystemPressure,
-    string? ForegroundProcess);
+    string? ForegroundProcess,
+    HostContext? HostContext = null,
+    ShellResponsiveness? ShellResponsiveness = null);
 
 public sealed record WatchMarker(
     DateTimeOffset Timestamp,

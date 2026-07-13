@@ -51,6 +51,75 @@ onelag watch mark
 onelag watch report --report onelag-watch-report.md
 ```
 
+Name the driver holding the CPU at high IRQL. This needs an elevated terminal, and you should reproduce the
+lag while it runs:
+
+```powershell
+onelag trace dpc --duration 30s --output onelag-driver-trace.md
+```
+
+Compare lag rates across hardware configurations, for example a docked day against an undocked day:
+
+```powershell
+onelag compare --session docked-day --session undocked-day --output onelag-comparison.md
+```
+
+Check that the probes actually measure anything on this machine before recording a session:
+
+```powershell
+onelag selftest
+```
+
+Collect the raw log files off this machine into one bundle, so analysis runs over the actual bytes instead
+of guessing at what is relevant — every OneDrive `.odl`, the `.log` files under the Windows tree, crash
+dumps, and the recent event logs:
+
+```powershell
+onelag collect --hours 48 --output onelag-logs
+```
+
+Run it from an elevated terminal for a complete bundle (some Windows logs and the Security event log need
+administrator rights). Add `--all-channels` to export every event-log channel rather than the broad default
+set. The result is a single `.zip` you can pull back for analysis. It is raw and unredacted by design — read
+`PRIVACY.txt` inside it before sharing. For a redacted, curated summary suitable for wider sharing, use
+`onelag support bundle` instead.
+
+## Finding Lag That Only Happens When Docked
+
+Run `onelag selftest` first. A watch session recorded with degraded collectors produces an
+authoritative-looking report containing nothing, and it costs a working day to find that out.
+
+
+If the machine is fine undocked and slow on the dock, the lag tracks the hardware, not the sync load. Record
+both configurations and let the tool compare them.
+
+Record a normal working day on the dock, with the monitors and Bluetooth peripherals you usually use. Press
+the lag marker whenever it stutters:
+
+```powershell
+onelag watch start --duration 8h --output docked-day
+onelag watch mark --output docked-day --note "cursor stuttered dragging a window"
+```
+
+Record another working day undocked, on the internal panel, with Bluetooth off:
+
+```powershell
+onelag watch start --duration 8h --output undocked-day
+```
+
+Compare them:
+
+```powershell
+onelag compare --session docked-day --session undocked-day --output onelag-comparison.md
+```
+
+If the lag concentrates in one configuration, run the driver trace from an elevated terminal *while in that
+configuration* to name the driver:
+
+```powershell
+onelag trace dpc --duration 30s
+```
+
 Review the supported OneDrive reset plan without changing anything:
 
 ```powershell
@@ -100,6 +169,11 @@ Open the native Windows tray/GUI:
 onelag-gui
 ```
 
+The GUI has tabs for Diagnose (self test), Scan, Watch, Collect Logs, Compare, Reports, Support, and
+Remediation, and shows a readiness banner on startup that tells you at a glance whether the probes are
+measuring live data. The tray icon's menu covers the workflow you need without opening a terminal: Self Test,
+Start/Stop Watch, **Mark Lag Now** (flag a freeze the instant you feel it), and Collect Logs.
+
 ## Local Validation
 
 Run the macOS-friendly validation suite from the repository root:
@@ -126,8 +200,21 @@ Windows validation details are documented in [Windows 11 validation](docs/window
 
 ## What We Are Working On
 
+OneLag is a lag differential tool. OneDrive is one hypothesis among ten, not the default. Every capture ranks
+all candidate causes against the same evidence, records what argues for and against each, and states how much
+of the evidence it could actually collect before it states a verdict. See
+[differential design](docs/differential-design.md) for why.
+
+The ranked causes are OneDrive sync, driver interrupt/DPC latency, the display and dock pipeline, the
+Bluetooth and input radio, storage saturation, CPU contention, memory paging, Explorer shell blocking,
+Defender/Search/Update scanners, and thermal or power throttling.
+
 We are building a tool that answers these questions on a Windows machine:
 
+- Which of the candidate causes does the evidence actually support, and which does it argue against?
+- Is a kernel driver holding a CPU at high IRQL long enough to stall the desktop and the cursor?
+- Does the lag track the dock, the external displays, or the Bluetooth radio rather than sync load?
+- Is Explorer genuinely blocked, measured rather than inferred?
 - Is OneDrive plausibly responsible for the current lag or Explorer unresponsiveness?
 - Is the evidence strong enough to say `OneDrive likely`, or is broader non-OneDrive system pressure more likely?
 - Are synced folders over the practical item-count limits documented by Microsoft?
@@ -154,6 +241,8 @@ The first implementation target was a .NET Windows console application because t
 ## Documentation
 
 - [Problem statement](docs/problem-statement.md)
+- [Differential design](docs/differential-design.md)
+- [Testing strategy](docs/testing-strategy.md)
 - [Research validation](docs/research-validation.md)
 - [Architecture](docs/architecture.md)
 - [Implementation plan](docs/implementation-plan.md)
@@ -170,6 +259,14 @@ The repository contains the source PDF, design documentation, development guardr
 Implemented in the current preview:
 
 - .NET solution split into core, Windows platform probe, CLI, and tests.
+- Ranked differential across ten candidate causes, with supporting and opposing evidence and a specific next step for each, plus a live-evidence gate that stops static folder shape from implicating OneDrive on its own.
+- `onelag trace dpc`, a bounded kernel ETW trace that attributes DPC and ISR time to specific driver images and maps each driver to the subsystem it belongs to, so the tool names the driver instead of handing out a WPR runbook.
+- `onelag compare`, which compares watch sessions recorded in different hardware configurations and reports lag episodes per hour for each.
+- Evidence-quality grading (`Complete`, `Partial`, `Insufficient`) stated above the verdict, so a capture with no live evidence says so instead of reading as authoritative.
+- DPC and interrupt sampling including per-core maximums, so a driver storm pinning one core is not averaged away.
+- Host-context sampling: display topology including DisplayLink-class indirect/USB displays, Bluetooth radio and connected devices, power source, and derived dock state.
+- Direct Explorer message-pump probing, so shell blocking is measured rather than inferred.
+- Watch-mode configuration correlation, reporting lag episodes per hour grouped by hardware configuration.
 - `onelag scan` with streaming inventory, high-risk directory detection, static sync-blocker detection, redacted Markdown/JSON reports, and conservative differential diagnosis.
 - Fuller OneDrive known-issue detection for invalid characters, leading/trailing spaces, blocked names, reserved device names, root `forms`, path-length limits, duplicate names, network/reparse sync roots, temporary files, PST/OST files, OneNote notebook files, preview-size limits, and large files.
 - OneDrive client-cache health metadata checks that avoid undocumented database parsing, report log/settings/DAT metadata, and offer a Microsoft-supported reset dry run.
@@ -182,7 +279,7 @@ Implemented in the current preview:
 - Watch report episode detection that groups timer-drift samples and manual lag markers into inferred categories.
 - UI-neutral report-view service plus `onelag view` for saved diagnostic and watch report summaries.
 - `onelag support bundle` for offline Codex/Claude Code analysis with copied reports, summaries, manifest, privacy checklist, user notes, environment snapshot, and a ready-to-use prompt.
-- Native Windows Forms tray/GUI with scan, watch, report view, support-bundle export, and remediation controls.
+- Native Windows Forms tray/GUI with a startup readiness banner, self test, scan, watch, log collection, session comparison, report view, support-bundle export, and remediation controls, and a tray menu covering self test, watch, mark-lag, and log collection.
 - Direct remediation move, verify, and rollback commands behind explicit confirmation flags.
 - Coverage collection, merged coverage summary, and CI artifact upload with initial ratchet gates.
 - Redacted sample diagnostic/watch reports and privacy/support-bundle guidance.
@@ -192,6 +289,7 @@ Implemented in the current preview:
 
 Still roadmap work:
 
+- Real Windows 11 validation of the DPC, driver-trace, display-topology, Bluetooth, and shell probes. All of the new Windows code degrades to an explicit `unavailable` evidence state rather than failing, but none of it has been observed against real hardware yet.
 - Signed MSI/EXE installer.
 - Deeper Windows-only validation for Files On-Demand states, WPR/WPA, and ProcMon escalation runbooks.
 - Real Windows 11 laptop validation run on a self-hosted runner.

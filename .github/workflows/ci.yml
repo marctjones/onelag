@@ -140,3 +140,59 @@ jobs:
             throw "repair dry-run returned unexpected exit code $LASTEXITCODE"
           }
           exit 0
+
+      # Hosted Windows runners are elevated, so this is the one place the kernel ETW path actually executes.
+      # It guards the two ways the driver trace fails silently: the native KernelTraceControl.dll being lost
+      # by single-file publish, and the session hanging instead of stopping at the end of its window.
+      - name: Smoke kernel driver trace
+        if: runner.os == 'Windows'
+        timeout-minutes: 3
+        shell: pwsh
+        run: |
+          $exe = Join-Path $PWD "artifacts/publish/win-x64/onelag.exe"
+          $trace = Join-Path $env:RUNNER_TEMP "onelag-ci-trace.md"
+          & $exe trace dpc --duration 10s --output $trace
+          if ($LASTEXITCODE -ne 0) {
+            throw "trace dpc smoke failed with exit code $LASTEXITCODE"
+          }
+          if (!(Test-Path $trace)) {
+            throw "trace dpc smoke did not create report"
+          }
+          $traceText = Get-Content $trace -Raw
+          if ($traceText -match "trace-runtime-unavailable") {
+            throw "trace dpc could not load its native dependency; KernelTraceControl.dll is missing from the published payload"
+          }
+          if ($traceText -match "requires-administrator") {
+            throw "trace dpc did not detect elevation on an elevated runner"
+          }
+          if ($traceText -notmatch "windows-kernel-etw") {
+            throw "trace dpc did not run a kernel session; report said: $traceText"
+          }
+
+      # The only place the wevtutil export and the Windows-tree walk actually run.
+      - name: Smoke log collection
+        if: runner.os == 'Windows'
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          $exe = Join-Path $PWD "artifacts/publish/win-x64/onelag.exe"
+          $bundle = Join-Path $env:RUNNER_TEMP "onelag-ci-logs"
+          & $exe collect --hours 48 --output $bundle --max-total-mb 256 --no-zip
+          if ($LASTEXITCODE -ne 0) {
+            throw "collect smoke failed with exit code $LASTEXITCODE"
+          }
+          $manifest = Join-Path $bundle "manifest.json"
+          foreach ($required in @("manifest.json", "PRIVACY.txt", "README.md", "analysis-prompt.md")) {
+            if (!(Test-Path (Join-Path $bundle $required))) {
+              throw "collect smoke did not produce $required"
+            }
+          }
+          $eventLogs = Get-ChildItem (Join-Path $bundle "eventlogs") -Filter *.xml -ErrorAction SilentlyContinue
+          if (-not $eventLogs) {
+            throw "collect smoke produced no event-log exports; wevtutil path is broken"
+          }
+          $system = $eventLogs | Where-Object { $_.Name -like "System*" } | Select-Object -First 1
+          if ($system -and ((Get-Content $system.FullName -Raw) -notmatch "<Event")) {
+            throw "collect smoke event-log export contained no events"
+          }
+          exit 0

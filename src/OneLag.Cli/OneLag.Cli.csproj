@@ -16,4 +16,17 @@
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>
 
+  <!--
+    TraceEvent P/Invokes into KernelTraceControl.dll to start the kernel logger session, and probes for it in
+    an architecture-named folder beside the running executable. Self-extraction flattens the bundle, so the
+    arch folder would not exist and the driver trace would fail at runtime with a missing-DLL error. Copying
+    after publish puts the folder where TraceEvent looks for it, next to onelag.exe.
+  -->
+  <Target Name="CopyKernelTraceControl" AfterTargets="Publish" Condition="'$(RuntimeIdentifier)' == 'win-x64'">
+    <ItemGroup>
+      <KernelTraceControlNative Include="$(NuGetPackageRoot)microsoft.diagnostics.tracing.traceevent\$(TraceEventVersion)\build\native\amd64\*.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(KernelTraceControlNative)" DestinationFolder="$(PublishDir)amd64" SkipUnchangedFiles="true" />
+  </Target>
+
 </Project>

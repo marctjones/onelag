@@ -233,15 +233,29 @@ public sealed class SupportBundleWriter
 
         {reportList}
 
+        OneDrive is one hypothesis among several, not the default. The reports rank ten candidate causes:
+        OneDrive sync, driver interrupt/DPC latency, the display and dock pipeline, the Bluetooth and input
+        radio, storage saturation, CPU contention, memory paging, Explorer shell blocking, Defender/Search
+        scanners, and thermal or power throttling. Do not assume OneDrive.
+
         Required analysis format:
 
-        1. Summarize the strongest observed evidence.
-        2. Separate direct observations from inferences.
-        3. Rank the likely causes with confidence and explain what evidence supports or weakens each cause.
-        4. Say whether OneDrive is likely, possible, not proven, or whether non-OneDrive system pressure is more likely.
-        5. Identify the safest next diagnostic step.
-        6. Identify any remediation that should not be run automatically.
-        7. List any missing evidence that would materially change the conclusion.
+        1. State the evidence quality first. If the capture is graded Insufficient, say that no diagnosis is
+           possible from it and stop ranking causes as though they were established.
+        2. Summarize the strongest observed evidence, separating direct observations from inferences.
+        3. Rank the likely causes with confidence, explaining what evidence supports AND what weakens each.
+        4. Check whether OneDrive has any live evidence at all (process CPU, log churn, disk saturation while
+           active). Static folder shape — item count, high-churn directories, sync blockers — describes
+           exposure, not an active cause, and on its own cannot implicate OneDrive in a freeze.
+        5. Check whether DPC or interrupt time is elevated, especially the per-core maximum. That is kernel
+           driver work and cannot be produced by OneDrive's user-mode sync engine.
+        6. If a watch report is present, check the configuration correlation: does lag concentrate in one
+           hardware configuration (docked, external displays, indirect/USB displays, Bluetooth connected)?
+           Lag that tracks the configuration rather than the sync load is a driver problem.
+        7. If a driver-interrupt trace is present, name the driver and the subsystem it belongs to.
+        8. Identify the safest next diagnostic step.
+        9. Identify any remediation that should not be run automatically.
+        10. List any missing evidence that would materially change the conclusion.
 
         Safety rules:
 
@@ -249,6 +263,7 @@ public sealed class SupportBundleWriter
         - Treat WPR, WPA, ProcMon, ETL, and PML files as privacy-sensitive escalation artifacts.
         - Prefer reversible, Microsoft-supported actions and reviewed dry-run plans.
         - If the evidence is inconclusive, say so directly.
+        - Do not blame OneDrive because the bundle came from a tool named OneLag.
         """;
     }
 
