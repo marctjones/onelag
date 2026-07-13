@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### GUI and tray parity
+
+- The GUI now exposes the full feature set: a **Diagnose** tab that runs the self test, a **Collect Logs** tab for the raw log bundle, and a **Compare** tab for docked-versus-undocked session comparison, alongside the existing scan, watch, report, support, and remediation tabs.
+- Added a startup readiness banner: the GUI runs the self test on launch and shows, at a glance, whether the probes are measuring live data — so a non-CLI user finds out immediately if a watch session would be empty, rather than after recording one.
+- The tray menu now covers the whole workflow without a terminal: Self Test, Start/Stop Watch, Mark Lag Now, and Collect Logs.
+
 ### Raw log collection
 
 - Added `onelag collect`, which pulls the actual log files off the machine into one bundle so analysis runs over real bytes instead of guessing at what is relevant: every OneDrive `.odl`, the `.log` and `.etl` files under the Windows tree (CBS, DISM, Panther, setupapi, storage, driver setup), crash dumps and live kernel reports, driver and system inventory, and the recent event logs. Events are exported per channel as rendered XML (with message text) over a configurable window via `wevtutil`; `--all-channels` exports every channel rather than the broad default set.

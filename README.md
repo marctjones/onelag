@@ -169,6 +169,11 @@ Open the native Windows tray/GUI:
 onelag-gui
 ```
 
+The GUI has tabs for Diagnose (self test), Scan, Watch, Collect Logs, Compare, Reports, Support, and
+Remediation, and shows a readiness banner on startup that tells you at a glance whether the probes are
+measuring live data. The tray icon's menu covers the workflow you need without opening a terminal: Self Test,
+Start/Stop Watch, **Mark Lag Now** (flag a freeze the instant you feel it), and Collect Logs.
+
 ## Local Validation
 
 Run the macOS-friendly validation suite from the repository root:
@@ -274,7 +279,7 @@ Implemented in the current preview:
 - Watch report episode detection that groups timer-drift samples and manual lag markers into inferred categories.
 - UI-neutral report-view service plus `onelag view` for saved diagnostic and watch report summaries.
 - `onelag support bundle` for offline Codex/Claude Code analysis with copied reports, summaries, manifest, privacy checklist, user notes, environment snapshot, and a ready-to-use prompt.
-- Native Windows Forms tray/GUI with scan, watch, report view, support-bundle export, and remediation controls.
+- Native Windows Forms tray/GUI with a startup readiness banner, self test, scan, watch, log collection, session comparison, report view, support-bundle export, and remediation controls, and a tray menu covering self test, watch, mark-lag, and log collection.
 - Direct remediation move, verify, and rollback commands behind explicit confirmation flags.
 - Coverage collection, merged coverage summary, and CI artifact upload with initial ratchet gates.
 - Redacted sample diagnostic/watch reports and privacy/support-bundle guidance.
