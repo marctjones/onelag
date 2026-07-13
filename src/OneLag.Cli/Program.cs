@@ -47,6 +47,7 @@ internal static class Program
                 "watch" => await RunWatch(args[1..], cancellation.Token),
                 "trace" => RunTrace(args[1..], cancellation.Token),
                 "compare" => RunCompare(args[1..]),
+                "collect" => RunCollect(args[1..]),
                 "selftest" => RunSelfTest(),
                 "repair" => RunRepair(args[1..]),
                 "support" => RunSupport(args[1..]),
@@ -216,6 +217,134 @@ internal static class Program
         Console.WriteLine("Too many probes are degraded for a watch session to be worth recording.");
         Console.WriteLine("Fix the FAIL lines above first; a session recorded now would produce an empty report.");
         return 1;
+    }
+
+    /// <summary>
+    /// Collects the actual log files off this machine into one bundle, so analysis runs over real bytes
+    /// instead of guesswork: every OneDrive `.odl`, the `.log` files under the Windows tree, crash dumps, and
+    /// the recent event logs. Raw and unredacted by design; bounded by size and count caps that record what
+    /// they dropped.
+    /// </summary>
+    private static int RunCollect(string[] args)
+    {
+        var output = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            $"onelag-logs-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}");
+        var hours = 48.0;
+        var maxTotalMb = 2048L;
+        var maxFileMb = 100L;
+        var zip = true;
+        var overwrite = false;
+        var allChannels = false;
+        var includeWindowsTree = true;
+
+        for (var i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--output":
+                case "-o":
+                    output = RequireValue(args, ref i, args[i]);
+                    break;
+                case "--hours":
+                    hours = double.Parse(RequireValue(args, ref i, "--hours"), CultureInfo.InvariantCulture);
+                    break;
+                case "--max-total-mb":
+                    maxTotalMb = long.Parse(RequireValue(args, ref i, "--max-total-mb"), CultureInfo.InvariantCulture);
+                    break;
+                case "--max-file-mb":
+                    maxFileMb = long.Parse(RequireValue(args, ref i, "--max-file-mb"), CultureInfo.InvariantCulture);
+                    break;
+                case "--all-channels":
+                    allChannels = true;
+                    break;
+                case "--no-windows-tree":
+                    includeWindowsTree = false;
+                    break;
+                case "--no-zip":
+                    zip = false;
+                    break;
+                case "--overwrite":
+                    overwrite = true;
+                    break;
+                default:
+                    throw new ArgumentException($"Unknown collect argument '{args[i]}'.");
+            }
+        }
+
+        if (hours <= 0 || hours > 168)
+        {
+            throw new ArgumentException("--hours must be greater than zero and no more than 168 (7 days).");
+        }
+
+        var scope = new LogCollectionScope(
+            TimeSpan.FromHours(hours),
+            IncludeWindowsTree: includeWindowsTree,
+            AllEventChannels: allChannels);
+
+        var options = new LogCollectionOptions(
+            output,
+            MaxTotalBytes: maxTotalMb * 1024 * 1024,
+            MaxFileBytes: maxFileMb * 1024 * 1024,
+            Zip: zip,
+            Overwrite: overwrite);
+
+        Console.WriteLine($"Collecting logs (last {hours:N0}h of events, up to {maxTotalMb:N0} MB total).");
+        if (!OperatingSystem.IsWindows())
+        {
+            Console.Error.WriteLine("Note: not running on Windows, so no Windows logs exist to collect.");
+        }
+        else if (!IsElevated())
+        {
+            Console.WriteLine("Tip: some Windows logs and the Security event log need administrator rights. Re-run elevated for a complete bundle.");
+        }
+
+        var items = new WindowsLogCollector().Enumerate(scope, DateTimeOffset.UtcNow);
+        var result = new LogCollectionService().Collect(options, items, DateTimeOffset.UtcNow);
+
+        Console.WriteLine();
+        Console.WriteLine($"Collected: {result.Collected:N0} file(s), {result.TotalBytes / 1024.0 / 1024.0:N1} MB");
+        if (result.Skipped > 0)
+        {
+            Console.WriteLine($"Skipped (too large or over cap): {result.Skipped:N0}. See manifest.json.");
+        }
+
+        if (result.Errors > 0)
+        {
+            Console.WriteLine($"Unreadable: {result.Errors:N0} (locked or access-denied). See manifest.json.");
+        }
+
+        Console.WriteLine($"Manifest: {result.ManifestPath}");
+        if (result.ZipPath is not null)
+        {
+            Console.WriteLine($"Bundle: {result.ZipPath}");
+            Console.WriteLine("Pull this single .zip back for analysis. It is raw and unredacted; read PRIVACY.txt before sharing.");
+        }
+        else
+        {
+            Console.WriteLine($"Bundle directory: {result.Directory}");
+        }
+
+        return 0;
+    }
+
+    private static bool IsElevated()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return false;
+        }
+
+        try
+        {
+            using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+            return new System.Security.Principal.WindowsPrincipal(identity)
+                .IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            return false;
+        }
     }
 
     private static int RunTrace(string[] args, CancellationToken cancellationToken)
@@ -1121,6 +1250,7 @@ internal static class Program
           watch report [--output DIR] [--report PATH]
           trace dpc [--duration 30s] [--output PATH]        (names the driver holding the CPU; needs admin)
           compare --session DIR --session DIR [--output PATH] (docked vs undocked lag rates)
+          collect [--hours 48] [--output DIR] [--all-channels] [--max-total-mb 2048] [--zip] (pull raw logs)
           repair reset-onedrive [--execute --i-understand-reset-disconnects-sync]
           support trace-plan [--output DIR]
           support bundle --report PATH [--report PATH] [--watch-output DIR] [--output DIR] [--zip]

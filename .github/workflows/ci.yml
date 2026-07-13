@@ -131,6 +131,33 @@ jobs:
           if ($traceText -notmatch "windows-kernel-etw") {
             throw "trace dpc did not run a kernel session; report said: $traceText"
           }
+
+      # The only place the wevtutil export and the Windows-tree walk actually run.
+      - name: Smoke log collection
+        if: runner.os == 'Windows'
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          $exe = Join-Path $PWD "artifacts/publish/win-x64/onelag.exe"
+          $bundle = Join-Path $env:RUNNER_TEMP "onelag-ci-logs"
+          & $exe collect --hours 48 --output $bundle --max-total-mb 256 --no-zip
+          if ($LASTEXITCODE -ne 0) {
+            throw "collect smoke failed with exit code $LASTEXITCODE"
+          }
+          $manifest = Join-Path $bundle "manifest.json"
+          foreach ($required in @("manifest.json", "PRIVACY.txt", "README.md", "analysis-prompt.md")) {
+            if (!(Test-Path (Join-Path $bundle $required))) {
+              throw "collect smoke did not produce $required"
+            }
+          }
+          $eventLogs = Get-ChildItem (Join-Path $bundle "eventlogs") -Filter *.xml -ErrorAction SilentlyContinue
+          if (-not $eventLogs) {
+            throw "collect smoke produced no event-log exports; wevtutil path is broken"
+          }
+          $system = $eventLogs | Where-Object { $_.Name -like "System*" } | Select-Object -First 1
+          if ($system -and ((Get-Content $system.FullName -Raw) -notmatch "<Event")) {
+            throw "collect smoke event-log export contained no events"
+          }
           $watch = Join-Path $env:RUNNER_TEMP "OneLagWatchSmoke"
           $watchReport = Join-Path $env:RUNNER_TEMP "onelag-watch-smoke.md"
           & $exe watch start --duration 1s --interval 1s --output $watch

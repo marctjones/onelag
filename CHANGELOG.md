@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Raw log collection
+
+- Added `onelag collect`, which pulls the actual log files off the machine into one bundle so analysis runs over real bytes instead of guessing at what is relevant: every OneDrive `.odl`, the `.log` and `.etl` files under the Windows tree (CBS, DISM, Panther, setupapi, storage, driver setup), crash dumps and live kernel reports, driver and system inventory, and the recent event logs. Events are exported per channel as rendered XML (with message text) over a configurable window via `wevtutil`; `--all-channels` exports every channel rather than the broad default set.
+- The bundle is raw and unredacted by design, and ships a `PRIVACY.txt`, a complete `manifest.json` with a SHA-256 per file, a `README.md`, and an analysis prompt, so its contents can be reviewed before it goes anywhere. For a redacted, curated summary, `onelag support bundle` remains the right tool.
+- Collection is bounded by per-file, total-size, and file-count caps that record what they dropped rather than failing or ballooning; the Windows tree is full of multi-gigabyte and locked logs, and busy files are copied through a shared read handle so the ones held open by their writer are not lost.
+
 ### Differential redesign
 
 OneDrive is no longer the only hypothesis the tool can hold. See [differential design](docs/differential-design.md).

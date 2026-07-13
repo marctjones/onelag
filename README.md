@@ -70,6 +70,20 @@ Check that the probes actually measure anything on this machine before recording
 onelag selftest
 ```
 
+Collect the raw log files off this machine into one bundle, so analysis runs over the actual bytes instead
+of guessing at what is relevant — every OneDrive `.odl`, the `.log` files under the Windows tree, crash
+dumps, and the recent event logs:
+
+```powershell
+onelag collect --hours 48 --output onelag-logs
+```
+
+Run it from an elevated terminal for a complete bundle (some Windows logs and the Security event log need
+administrator rights). Add `--all-channels` to export every event-log channel rather than the broad default
+set. The result is a single `.zip` you can pull back for analysis. It is raw and unredacted by design — read
+`PRIVACY.txt` inside it before sharing. For a redacted, curated summary suitable for wider sharing, use
+`onelag support bundle` instead.
+
 ## Finding Lag That Only Happens When Docked
 
 Run `onelag selftest` first. A watch session recorded with degraded collectors produces an

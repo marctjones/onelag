@@ -56,6 +56,12 @@ it is tested against the address ranges Windows actually reports — including t
 rejected, that the rundown reporting a module twice does not duplicate it, and that an address in a gap
 resolves to `unresolved` rather than being attributed to an innocent neighbour.
 
+The same split applies to log collection. `LogCollectionService` — staging, SHA-256, the per-file, total, and
+count caps, path sanitisation, the manifest, and the zip — is platform-neutral and covered by
+`LogCollectionServiceTests` with synthetic items on any OS. The Windows-specific part, `WindowsLogCollector`,
+only *enumerates* sources (OneDrive logs, the Windows tree, `wevtutil` exports), and its real behaviour is a
+Tier-3 check.
+
 ### Tier 3 — Real Windows (runs only on Windows)
 
 Nothing above makes a single call into Windows. `WindowsProbeIntegrationTests` does, gated by
