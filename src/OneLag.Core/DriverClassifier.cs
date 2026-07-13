@@ -62,7 +62,7 @@ public static class DriverClassifier
             return (null, null);
         }
 
-        var name = Path.GetFileNameWithoutExtension(driver);
+        var name = Stem(driver);
 
         foreach (var (fragment, kind, subsystem) in Signatures)
         {
@@ -124,7 +124,23 @@ public static class DriverClassifier
 
     private static bool IsNotActionable(string driver)
     {
-        var name = Path.GetFileNameWithoutExtension(driver);
-        return NotActionable.Any(excluded => name.Equals(excluded, StringComparison.OrdinalIgnoreCase));
+        return NotActionable.Any(excluded => Stem(driver).Equals(excluded, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// The bare driver name, without directory or extension.
+    ///
+    /// Driver names arrive from Windows as paths like <c>C:\Windows\system32\drivers\dlkmdldr.sys</c>. The
+    /// framework's path helpers resolve separators against the *host* operating system, so on macOS or Linux
+    /// they would treat the backslashes as ordinary characters and never find the file name. This data is
+    /// Windows data wherever the analysis runs, so the separators are handled explicitly.
+    /// </summary>
+    private static string Stem(string driver)
+    {
+        var separator = driver.LastIndexOfAny(new[] { '\\', '/' });
+        var name = separator >= 0 ? driver[(separator + 1)..] : driver;
+
+        var dot = name.LastIndexOf('.');
+        return dot > 0 ? name[..dot] : name;
     }
 }

@@ -138,7 +138,7 @@ internal static class WindowsBluetoothDeviceProbe
     };
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct DevPropKey
+    internal struct DevPropKey
     {
         public Guid Fmtid;
         public uint Pid;

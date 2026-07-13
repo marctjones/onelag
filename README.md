@@ -64,7 +64,17 @@ Compare lag rates across hardware configurations, for example a docked day again
 onelag compare --session docked-day --session undocked-day --output onelag-comparison.md
 ```
 
+Check that the probes actually measure anything on this machine before recording a session:
+
+```powershell
+onelag selftest
+```
+
 ## Finding Lag That Only Happens When Docked
+
+Run `onelag selftest` first. A watch session recorded with degraded collectors produces an
+authoritative-looking report containing nothing, and it costs a working day to find that out.
+
 
 If the machine is fine undocked and slow on the dock, the lag tracks the hardware, not the sync load. Record
 both configurations and let the tool compare them.
@@ -213,6 +223,7 @@ The first implementation target was a .NET Windows console application because t
 
 - [Problem statement](docs/problem-statement.md)
 - [Differential design](docs/differential-design.md)
+- [Testing strategy](docs/testing-strategy.md)
 - [Research validation](docs/research-validation.md)
 - [Architecture](docs/architecture.md)
 - [Implementation plan](docs/implementation-plan.md)

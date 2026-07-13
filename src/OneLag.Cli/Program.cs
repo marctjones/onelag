@@ -47,6 +47,7 @@ internal static class Program
                 "watch" => await RunWatch(args[1..], cancellation.Token),
                 "trace" => RunTrace(args[1..], cancellation.Token),
                 "compare" => RunCompare(args[1..]),
+                "selftest" => RunSelfTest(),
                 "repair" => RunRepair(args[1..]),
                 "support" => RunSupport(args[1..]),
                 "remediate" => RunRemediate(args[1..], cancellation.Token),
@@ -169,6 +170,52 @@ internal static class Program
             "report" => WatchReport(args[1..]),
             _ => UnknownCommand($"watch {args[0]}")
         };
+    }
+
+    /// <summary>
+    /// Reports which probes actually measured something. Run this before recording a watch session: a session
+    /// whose collectors were all degraded produces an authoritative-looking report containing nothing.
+    /// </summary>
+    private static int RunSelfTest()
+    {
+        var report = new SelfTestService(new WindowsPlatformProbe()).Run();
+
+        Console.WriteLine("OneLag self test");
+        Console.WriteLine();
+
+        foreach (var probe in report.Probes)
+        {
+            var marker = probe.Status switch
+            {
+                ProbeStatus.Live => "OK  ",
+                ProbeStatus.Degraded => "WARN",
+                _ => "FAIL"
+            };
+
+            Console.WriteLine($"[{marker}] {probe.Probe,-22} {probe.Detail}");
+            Console.WriteLine($"       {probe.EvidenceState}");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine($"Evidence quality: {report.Quality.Grade} ({report.Quality.Score}/100)");
+
+        foreach (var gap in report.Quality.Gaps)
+        {
+            Console.WriteLine($"  - {gap}");
+        }
+
+        Console.WriteLine();
+
+        if (report.ReadyToDiagnose)
+        {
+            Console.WriteLine("This machine is instrumented well enough to record a watch session.");
+            Console.WriteLine("Next: onelag watch start --duration 8h --output docked-day");
+            return 0;
+        }
+
+        Console.WriteLine("Too many probes are degraded for a watch session to be worth recording.");
+        Console.WriteLine("Fix the FAIL lines above first; a session recorded now would produce an empty report.");
+        return 1;
     }
 
     private static int RunTrace(string[] args, CancellationToken cancellationToken)
@@ -1065,6 +1112,7 @@ internal static class Program
         OneLag
 
         Commands:
+          selftest                                          (which probes actually measure anything; run this first)
           scan [--root PATH] [--output PATH] [--format markdown|json] [--full-paths] [--trace-drivers 30s]
           watch start [--duration 8h] [--interval 2s] [--output DIR]
           watch stop [--output DIR]

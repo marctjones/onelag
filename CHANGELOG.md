@@ -26,7 +26,23 @@ OneDrive is no longer the only hypothesis the tool can hold. See [differential d
 - The GUI reports evidence quality and ranked causes after a scan, and has a driver-trace button.
 - The support-bundle analysis prompt now instructs offline review to lead with evidence quality, to check for live OneDrive evidence before accepting folder shape as a cause, to check the per-core DPC signal, to check the configuration correlation, and not to blame OneDrive merely because the bundle came from a tool named OneLag.
 
+### Testing the Windows layer from a macOS dev machine
+
+See [testing strategy](docs/testing-strategy.md). The measurement layer had zero test coverage: a green run on
+the dev machine meant nothing had executed, not that anything worked.
+
+- Added `InteropLayoutTests`, which pins every interop struct against its native contract using `Marshal.SizeOf` and `Marshal.OffsetOf` — managed metadata that resolves identically off Windows. Offsets are asserted, not just sizes: swapping two `uint` fields leaves the struct the same size while making OneLag read a rotation value as a display output technology.
+- Added `WindowsEventFixtures`, a faithful model of how Windows renders events, including the variation that breaks parsers: classic providers carrying only a `Guid` or an `EventSourceName`, `EventID` with a `Qualifiers` attribute, missing `Level`, missing `TimeCreated`, malformed XML. `WindowsEventEvidenceTests` carries those events into the differential, so a display-driver reset is proven to move the display-and-dock hypothesis rather than merely to parse.
+- Fixed a real gap this surfaced: a classic provider rendered with only a GUID was reported as `unknown`, making it invisible to every hypothesis that matches on provider name.
+- Extracted `OneDriveLogStore` with an injectable log root and clock. OneDrive's `.odl` files are an undocumented binary format that this project deliberately never parses; the churn signal it does use is pure file metadata, and is now tested against a synthetic log store. A missing log store is reported as *unmeasured* rather than as *quiet*, and files stamped in the future after a clock change no longer count as churn.
+- Extracted `KernelModuleMap` from the ETW session, so driver attribution — which loaded kernel image contains this routine address — is testable without running a kernel trace, and now uses a binary search rather than a linear scan.
+- Added `FakePlatformProbe` and `ScanPipelineTests`, giving `ScanRunner` its first coverage: a thrashing OneDrive is blamed on OneDrive, a pinned CPU core with a DisplayLink monitor is blamed on the dock, and a capture where every collector degraded produces an Insufficient report rather than a verdict.
+- Added `WindowsProbeIntegrationTests`, gated by `[WindowsFact]` so they skip on macOS rather than silently passing. They assert probes returned *live* data, not merely that they did not throw.
+- Added `onelag selftest`, which runs every probe once and reports which ones measured anything. A watch session recorded with degraded collectors produces an authoritative-looking report containing nothing, and costs a working day to discover.
+
 ### Fixed
+
+- Driver names arrive from Windows as full paths, and `Path.GetFileName` splits on the *host* separator, so off Windows it treated the backslashes as ordinary characters and returned the entire path as the driver name. `DriverClassifier` would then have matched nothing and reported every driver as unclassified. Caught by the new cross-platform tests.
 
 - Watch-mode timer drift was measured against a running schedule, so the samplers' own cost (PDH and process sampling each hold a window open) was folded into drift and accumulated. Every sample after the first read as a lag episode with an ever-growing stall, which would have made an all-day watch session produce nothing but false positives. Drift now measures the overshoot of each individual sleep.
 - PDH counter values were accepted only when `CStatus` equalled zero. `CStatus` is severity-coded, and rate counters — which is every counter OneLag samples — are documented to return `PDH_CSTATUS_NEW_DATA` (1) when the raw value advanced between collections. The equality test discarded exactly the samples that carried data. Success is now tested by severity.

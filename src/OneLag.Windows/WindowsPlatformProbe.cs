@@ -261,29 +261,7 @@ public sealed class WindowsPlatformProbe : PortablePlatformProbe
 
     private static int CountOneDriveLogChurn()
     {
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        if (string.IsNullOrWhiteSpace(localAppData))
-        {
-            return 0;
-        }
-
-        var logRoot = Path.Combine(localAppData, "Microsoft", "OneDrive", "logs");
-        if (!Directory.Exists(logRoot))
-        {
-            return 0;
-        }
-
-        var cutoff = DateTimeOffset.Now.AddMinutes(-1);
-        try
-        {
-            return Directory.EnumerateFiles(logRoot, "*", SearchOption.AllDirectories)
-                .Take(10_000)
-                .Count(path => File.GetLastWriteTime(path) >= cutoff.LocalDateTime);
-        }
-        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or DirectoryNotFoundException)
-        {
-            return 0;
-        }
+        return OneDriveLogStore.Measure(OneDriveLogStore.DefaultLogRoot(), DateTimeOffset.UtcNow).FilesChangedLastMinute;
     }
 
     private static IReadOnlyList<OneDriveResetCommand> FindResetCommands()

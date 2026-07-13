@@ -22,15 +22,6 @@ internal static class WindowsDriverTraceProbe
 {
     private const int MaxDrivers = 25;
 
-    /// <summary>
-    /// Kernel-mode addresses on x64 and arm64 sit in the upper half of the address space. The ImageLoad
-    /// keyword reports images for every process, and a desktop has tens of thousands of user-mode modules
-    /// loaded; keeping them would turn every address lookup into a scan of the whole list, on the single
-    /// thread that has to keep up with hundreds of thousands of DPC events. The consumer would fall behind,
-    /// ETW would drop events, and the totals would silently under-report.
-    /// </summary>
-    private const ulong KernelAddressFloor = 0xFFFF_8000_0000_0000UL;
-
     public static DriverLatencyAttribution Capture(TimeSpan duration, CancellationToken cancellationToken)
     {
         if (!OperatingSystem.IsWindows())
@@ -66,7 +57,7 @@ internal static class WindowsDriverTraceProbe
 
     private static DriverLatencyAttribution Run(DateTimeOffset startedAt, TimeSpan duration, CancellationToken cancellationToken)
     {
-        var modules = new Dictionary<ulong, KernelModule>();
+        var modules = new KernelModuleMap();
         var accumulators = new Dictionary<(string Driver, string Kind), Accumulator>();
 
         // Guards the stop-before-process race: CancellationToken.Register runs its callback synchronously
@@ -85,19 +76,11 @@ internal static class WindowsDriverTraceProbe
             | KernelTraceEventParser.Keywords.ImageLoad);
 
         // The ImageLoad rundown reports every image already resident when the session starts, which is what
-        // turns a routine address into a driver name. Only kernel images are kept, and only once each: the
-        // DCStop rundown re-reports the same modules at the end of the session.
+        // turns a routine address into a driver name. KernelModuleMap drops user-mode images and ignores the
+        // repeat reports from the DCStop rundown.
         void OnImage(ImageLoadTraceData data)
         {
-            if (data.ImageSize <= 0 || data.ImageBase < KernelAddressFloor)
-            {
-                return;
-            }
-
-            modules.TryAdd(data.ImageBase, new KernelModule(
-                data.ImageBase,
-                data.ImageBase + (ulong)data.ImageSize,
-                Path.GetFileName(data.FileName)));
+            modules.TryAdd(data.ImageBase, data.ImageSize, data.FileName);
         }
 
         session.Source.Kernel.ImageLoad += OnImage;
@@ -154,7 +137,7 @@ internal static class WindowsDriverTraceProbe
 
     private static void Record(
         Dictionary<(string Driver, string Kind), Accumulator> accumulators,
-        Dictionary<ulong, KernelModule> modules,
+        KernelModuleMap modules,
         ulong routine,
         double elapsedMilliseconds,
         string kind)
@@ -164,7 +147,7 @@ internal static class WindowsDriverTraceProbe
             return;
         }
 
-        var key = (Resolve(modules, routine), kind);
+        var key = (modules.Resolve(routine), kind);
         if (!accumulators.TryGetValue(key, out var accumulator))
         {
             accumulator = new Accumulator();
@@ -173,26 +156,6 @@ internal static class WindowsDriverTraceProbe
 
         accumulator.Add(elapsedMilliseconds);
     }
-
-    private static string Resolve(Dictionary<ulong, KernelModule> modules, ulong address)
-    {
-        if (address < KernelAddressFloor)
-        {
-            return "unresolved";
-        }
-
-        foreach (var module in modules.Values)
-        {
-            if (address >= module.Start && address < module.End)
-            {
-                return module.Name;
-            }
-        }
-
-        return "unresolved";
-    }
-
-    private sealed record KernelModule(ulong Start, ulong End, string Name);
 
     private sealed class Accumulator
     {

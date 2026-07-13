@@ -9,6 +9,16 @@
   </ItemGroup>
 
   <!--
+    The interop structs are the highest-risk code in the project and cannot be executed off Windows. Their
+    memory layout, however, is managed metadata: Marshal.SizeOf and Marshal.OffsetOf resolve it on any OS.
+    Exposing them to the test assembly lets every field offset be pinned against the native contract from a
+    macOS dev machine, so a future field reorder fails the build instead of corrupting a Windows-only read.
+  -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="OneLag.Windows.Tests" />
+  </ItemGroup>
+
+  <!--
     TraceEvent P/Invokes into KernelTraceControl.dll to start the kernel logger session, and probes for it in
     an architecture-named folder next to the running executable. The package ships the native binaries with
     CopyToOutputDirectory but not CopyToPublishDirectory, so a single-file publish drops them and the driver

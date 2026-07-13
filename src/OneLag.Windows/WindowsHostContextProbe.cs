@@ -358,21 +358,21 @@ internal static class WindowsHostContextProbe
     private static extern uint DisplayConfigGetDeviceInfo(ref DisplayConfigTargetDeviceName requestPacket);
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct Luid
+    internal struct Luid
     {
         public uint LowPart;
         public int HighPart;
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct DisplayConfigRational
+    internal struct DisplayConfigRational
     {
         public uint Numerator;
         public uint Denominator;
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct DisplayConfigPathSourceInfo
+    internal struct DisplayConfigPathSourceInfo
     {
         public Luid AdapterId;
         public uint Id;
@@ -381,7 +381,7 @@ internal static class WindowsHostContextProbe
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct DisplayConfigPathTargetInfo
+    internal struct DisplayConfigPathTargetInfo
     {
         public Luid AdapterId;
         public uint Id;
@@ -396,7 +396,7 @@ internal static class WindowsHostContextProbe
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct DisplayConfigPathInfo
+    internal struct DisplayConfigPathInfo
     {
         public DisplayConfigPathSourceInfo SourceInfo;
         public DisplayConfigPathTargetInfo TargetInfo;
@@ -404,7 +404,7 @@ internal static class WindowsHostContextProbe
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct DisplayConfigSourceMode
+    internal struct DisplayConfigSourceMode
     {
         public uint Width;
         public uint Height;
@@ -418,14 +418,14 @@ internal static class WindowsHostContextProbe
     /// source mode is read, but the size must match or the surrounding array stride is wrong.
     /// </summary>
     [StructLayout(LayoutKind.Explicit, Size = 48)]
-    private struct DisplayConfigModeUnion
+    internal struct DisplayConfigModeUnion
     {
         [FieldOffset(0)]
         public DisplayConfigSourceMode SourceMode;
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct DisplayConfigModeInfo
+    internal struct DisplayConfigModeInfo
     {
         public uint InfoType;
         public uint Id;
@@ -434,7 +434,7 @@ internal static class WindowsHostContextProbe
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct DisplayConfigDeviceInfoHeader
+    internal struct DisplayConfigDeviceInfoHeader
     {
         public uint Type;
         public uint Size;
@@ -443,7 +443,7 @@ internal static class WindowsHostContextProbe
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct DisplayConfigTargetDeviceName
+    internal struct DisplayConfigTargetDeviceName
     {
         public DisplayConfigDeviceInfoHeader Header;
         public uint Flags;
@@ -478,13 +478,13 @@ internal static class WindowsHostContextProbe
     private static extern bool CloseHandle(IntPtr handle);
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct BluetoothFindRadioParams
+    internal struct BluetoothFindRadioParams
     {
         public uint Size;
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct BluetoothDeviceSearchParams
+    internal struct BluetoothDeviceSearchParams
     {
         public uint Size;
 
@@ -509,7 +509,7 @@ internal static class WindowsHostContextProbe
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct BluetoothDeviceInfo
+    internal struct BluetoothDeviceInfo
     {
         public uint Size;
         public ulong Address;
@@ -532,7 +532,7 @@ internal static class WindowsHostContextProbe
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct SystemTime
+    internal struct SystemTime
     {
         public ushort Year;
         public ushort Month;

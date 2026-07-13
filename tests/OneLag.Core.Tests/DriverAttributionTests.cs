@@ -24,6 +24,27 @@ public sealed class DriverAttributionTests
     }
 
     [Fact]
+    public void ClassifyReadsWindowsPathsRegardlessOfTheHostOperatingSystem()
+    {
+        // Driver names arrive from Windows as full paths. The framework's path helpers split on the *host*
+        // separator, so off Windows they would treat the backslashes as ordinary characters and match nothing
+        // — the classifier would silently fail to recognise any driver, and every trace would come back
+        // unclassified.
+        var (kind, subsystem) = DriverClassifier.Classify(@"C:\Windows\system32\drivers\dlkmdldr.sys");
+
+        Assert.Equal(HypothesisKind.DisplayOrDockPipeline, kind);
+        Assert.Contains("DisplayLink", subsystem!, StringComparison.Ordinal);
+
+        var attribution = new DriverLatencyAttribution(
+            DateTimeOffset.UtcNow,
+            TimeSpan.FromSeconds(30),
+            new[] { new DriverLatencySample(@"C:\Windows\system32\ntoskrnl.exe", "dpc", 800, 2.4, 40_000) },
+            "windows-kernel-etw-dpc-isr");
+
+        Assert.Empty(DriverClassifier.Significant(attribution));
+    }
+
+    [Fact]
     public void SignificantDropsNoiseAndUnresolvedAddresses()
     {
         var attribution = new DriverLatencyAttribution(

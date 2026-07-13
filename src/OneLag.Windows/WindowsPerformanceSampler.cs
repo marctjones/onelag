@@ -479,14 +479,14 @@ internal static class WindowsPerformanceSampler
     private static extern uint PdhCloseQuery(IntPtr query);
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct PdhFormattedCounterValue
+    internal struct PdhFormattedCounterValue
     {
         public uint CStatus;
         public double DoubleValue;
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct PdhFormattedCounterValueItem
+    internal struct PdhFormattedCounterValueItem
     {
         public IntPtr Name;
         public PdhFormattedCounterValue Value;
@@ -496,7 +496,7 @@ internal static class WindowsPerformanceSampler
     private static extern bool GetPerformanceInfo(out PerformanceInformation performanceInformation, int size);
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct PerformanceInformation
+    internal struct PerformanceInformation
     {
         public int Size;
         public UIntPtr CommitTotal;
@@ -518,7 +518,7 @@ internal static class WindowsPerformanceSampler
     private static extern bool GetSystemPowerStatus(out SystemPowerStatus systemPowerStatus);
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct SystemPowerStatus
+    internal struct SystemPowerStatus
     {
         public byte ACLineStatus;
         public byte BatteryFlag;
