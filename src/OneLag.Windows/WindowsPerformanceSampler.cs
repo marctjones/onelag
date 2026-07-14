@@ -19,7 +19,15 @@ internal static class WindowsPerformanceSampler
         new(@"\Processor(_Total)\% DPC Time", "processor-dpc-percent", "percent"),
         new(@"\Processor(_Total)\% Interrupt Time", "processor-interrupt-percent", "percent"),
         new(@"\Processor(_Total)\DPCs Queued/sec", "processor-dpcs-queued-per-second", "count-per-second"),
-        new(@"\Processor(_Total)\Interrupts/sec", "processor-interrupts-per-second", "count-per-second")
+        new(@"\Processor(_Total)\Interrupts/sec", "processor-interrupts-per-second", "count-per-second"),
+
+        // Page Reads/sec is the hard-fault rate: a UI thread that touches a page the working set no longer
+        // holds blocks on disk I/O to bring it back, which is exactly the "click does nothing, then everything
+        // replays at once" symptom a leak produces once commit forces active pages out to the page file.
+        // Pages Input/sec counts pages, not reads, so a run of contiguous faults serviced by one I/O still
+        // shows up as a multi-page cost rather than being hidden behind a single read.
+        new(@"\Memory\Page Reads/sec", "memory-page-reads-per-second", "count-per-second"),
+        new(@"\Memory\Pages Input/sec", "memory-pages-input-per-second", "count-per-second")
     };
 
     /// <summary>
@@ -493,7 +501,7 @@ internal static class WindowsPerformanceSampler
     }
 
     [DllImport("psapi.dll", SetLastError = true)]
-    private static extern bool GetPerformanceInfo(out PerformanceInformation performanceInformation, int size);
+    internal static extern bool GetPerformanceInfo(out PerformanceInformation performanceInformation, int size);
 
     [StructLayout(LayoutKind.Sequential)]
     internal struct PerformanceInformation

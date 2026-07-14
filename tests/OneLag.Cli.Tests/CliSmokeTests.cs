@@ -67,7 +67,19 @@ public sealed class CliSmokeTests : IDisposable
     {
         var watchRoot = Path.Combine(tempRoot, "watch");
 
-        var start = await RunCli("watch", "start", "--duration", "1s", "--interval", "1s", "--output", watchRoot);
+        // The collectors are all unavailable off Windows, so the pre-flight refuses to start unless the run is
+        // knowingly acknowledged as degraded. That refusal is asserted on its own below; here we are exercising
+        // the recorder, so the acknowledgement is given explicitly.
+        var start = await RunCli(
+            "watch",
+            "start",
+            "--duration",
+            "1s",
+            "--interval",
+            "1s",
+            "--output",
+            watchRoot,
+            "--i-understand-collectors-are-degraded");
         Assert.Equal(0, start.ExitCode);
         Assert.True(File.Exists(Path.Combine(watchRoot, "samples.ndjson")));
 
@@ -88,6 +100,23 @@ public sealed class CliSmokeTests : IDisposable
         Assert.Equal(0, view.ExitCode);
         Assert.Contains("Kind: Watch", view.StandardOutput);
         Assert.Contains("lag-marker", view.StandardOutput);
+    }
+
+    [Fact]
+    public async Task WatchStartRefusesToRecordWithDegradedCollectors()
+    {
+        // The load-bearing behaviour of the whole pre-flight: an 8-hour run whose collectors are degraded
+        // produces an authoritative-looking report containing nothing, and it costs a working day to find that
+        // out. Refusing to start is the correct outcome, and it must be a non-zero exit so a script cannot
+        // ignore it. It must also never prompt, so a CI job like this one cannot hang on it.
+        var watchRoot = Path.Combine(tempRoot, "watch-refused");
+
+        var start = await RunCli("watch", "start", "--duration", "1s", "--interval", "1s", "--output", watchRoot);
+
+        Assert.NotEqual(0, start.ExitCode);
+        Assert.Contains("REFUSING TO START", start.StandardError, StringComparison.Ordinal);
+        Assert.Contains("i-understand-collectors-are-degraded", start.StandardError, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(watchRoot, "samples.ndjson")));
     }
 
     [Fact]

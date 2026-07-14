@@ -276,6 +276,235 @@ public sealed record DriverLatencyAttribution(
         evidenceState);
 }
 
+/// <summary>
+/// One file-system filter driver (minifilter) attached to a volume. Altitude determines load order.
+/// </summary>
+public sealed record FilterDriverInfo(
+    string Name,
+    double? Altitude,
+    int Instances,
+    string? Vendor,
+    bool IsFileSystemFilter,
+    bool IsMicrosoft);
+
+/// <summary>
+/// The file-system filter stack. Every file open — and an open-file dialog performs one per file just to
+/// draw an icon — traverses every attached minifilter synchronously. A machine carrying a large third-party
+/// security stack pays that cost on every directory listing, which is why Explorer and file dialogs are
+/// often the only surface that visibly suffers.
+///
+/// This is the collector the SecurityOrSearchScanner hypothesis never had: it previously looked only at
+/// Defender and Search CPU, so a machine running eleven third-party kernel filters scored zero.
+/// </summary>
+public sealed record FilterDriverStack(
+    DateTimeOffset Timestamp,
+    IReadOnlyList<FilterDriverInfo> Filters,
+    int FileSystemFilterCount,
+    int ThirdPartyFileSystemFilterCount,
+    IReadOnlyList<string> SecurityVendors,
+    bool? DefenderFilterRunning,
+    bool? CloudFilesFilterRunning,
+    string EvidenceState)
+{
+    public static FilterDriverStack Unavailable(string evidenceState) => new(
+        DateTimeOffset.UtcNow,
+        Array.Empty<FilterDriverInfo>(),
+        0,
+        0,
+        Array.Empty<string>(),
+        null,
+        null,
+        evidenceState);
+}
+
+/// <summary>
+/// A process Windows itself flagged as a probable memory leak, via RADAR (Windows Error Reporting bucket
+/// RADAR_PRE_LEAK_64) or the Resource-Exhaustion-Resolver. When Windows names the leaking process, that is
+/// far stronger evidence than any heuristic OneLag could compute, and it was previously not collected at all.
+/// </summary>
+public sealed record MemoryLeakCandidate(
+    string ProcessName,
+    int? ProcessId,
+    DateTimeOffset ObservedAt,
+    TimeSpan? ProcessUptime,
+    string Source);
+
+public sealed record ProcessCommitSample(
+    string Name,
+    int ProcessId,
+    long PrivateBytes,
+    long WorkingSetBytes);
+
+/// <summary>
+/// Memory pressure in the terms that actually predict a freeze.
+///
+/// The previous scan reported only a commit percentage and an absolute available-MB figure, and scored both
+/// against fixed thresholds — so 1.5 GB of commit headroom on a 16 GB machine scored zero. What matters is
+/// headroom, the rate it is being consumed, how long the machine has been up, and which process is holding it.
+/// </summary>
+public sealed record MemoryPressureDetail(
+    DateTimeOffset Timestamp,
+    long? CommitTotalBytes,
+    long? CommitLimitBytes,
+    long? PhysicalTotalBytes,
+    long? PhysicalAvailableBytes,
+    TimeSpan? SystemUptime,
+    IReadOnlyList<ProcessCommitSample> TopCommitProcesses,
+    IReadOnlyList<MemoryLeakCandidate> LeakCandidates,
+    string EvidenceState,
+    long? KernelPagedPoolBytes = null,
+    long? KernelNonPagedPoolBytes = null,
+    long? SumOfProcessPrivateBytes = null,
+    int? ProcessesSampled = null,
+    int? ProcessesInaccessible = null)
+{
+    [JsonIgnore]
+    public long? CommitHeadroomBytes => CommitLimitBytes.HasValue && CommitTotalBytes.HasValue
+        ? CommitLimitBytes.Value - CommitTotalBytes.Value
+        : null;
+
+    [JsonIgnore]
+    public double? CommitPercent => CommitLimitBytes is > 0 && CommitTotalBytes.HasValue
+        ? (double)CommitTotalBytes.Value / CommitLimitBytes.Value * 100
+        : null;
+
+    [JsonIgnore]
+    public double? PhysicalAvailablePercent => PhysicalTotalBytes is > 0 && PhysicalAvailableBytes.HasValue
+        ? (double)PhysicalAvailableBytes.Value / PhysicalTotalBytes.Value * 100
+        : null;
+
+    /// <summary>
+    /// Commit that no user-mode process accounts for.
+    ///
+    /// This is the number that decides where a leak lives, and OneLag could not previously see it at all.
+    /// Task Manager's Details tab lists only user-mode processes, so a driver leaking kernel pool shows up
+    /// nowhere in that list while still consuming commit. If the machine is holding tens of gigabytes and the
+    /// sum of every process's private bytes is a small fraction of it, the memory is being held in the kernel
+    /// by a driver, not by a program — and no amount of closing applications will return it.
+    ///
+    /// Deliberately not clamped to zero: a negative value means the accounting itself is unreliable (processes
+    /// were sampled at a different instant, or access was denied for the largest consumers), and a wrong number
+    /// that admits it is wrong is worth more than a plausible one that hides it. Read alongside
+    /// <see cref="ProcessesInaccessible"/> before trusting it.
+    /// </summary>
+    [JsonIgnore]
+    public long? UnaccountedCommitBytes => CommitTotalBytes.HasValue && SumOfProcessPrivateBytes.HasValue
+        ? CommitTotalBytes.Value - SumOfProcessPrivateBytes.Value
+        : null;
+
+    [JsonIgnore]
+    public long? KernelPoolBytes => KernelPagedPoolBytes.HasValue || KernelNonPagedPoolBytes.HasValue
+        ? (KernelPagedPoolBytes ?? 0) + (KernelNonPagedPoolBytes ?? 0)
+        : null;
+
+    public static MemoryPressureDetail Unavailable(string evidenceState) => new(
+        DateTimeOffset.UtcNow,
+        null,
+        null,
+        null,
+        null,
+        null,
+        Array.Empty<ProcessCommitSample>(),
+        Array.Empty<MemoryLeakCandidate>(),
+        evidenceState);
+}
+
+public sealed record ShellExtensionInfo(
+    string Clsid,
+    string Name,
+    string Kind,
+    string? Publisher,
+    bool IsMicrosoft);
+
+public static class ShellExtensionKinds
+{
+    public const string IconOverlay = "icon-overlay";
+    public const string ContextMenu = "context-menu";
+    public const string PropertySheet = "property-sheet";
+}
+
+/// <summary>
+/// Registered Explorer shell extensions. Icon overlay handlers run synchronously on the Explorer UI thread
+/// and Windows honours only the first ~15 by sort order, so a crowded overlay list both blocks the shell and
+/// silently drops handlers. This is a classic cause of slow Explorer and slow open-file dialogs, and OneLag
+/// could not see it because the log bundle contains no registry export.
+/// </summary>
+public sealed record ShellExtensionInventory(
+    DateTimeOffset Timestamp,
+    IReadOnlyList<ShellExtensionInfo> Extensions,
+    int IconOverlayCount,
+    int ThirdPartyIconOverlayCount,
+    string EvidenceState)
+{
+    public const int IconOverlayLimit = 15;
+
+    public static ShellExtensionInventory Unavailable(string evidenceState) => new(
+        DateTimeOffset.UtcNow,
+        Array.Empty<ShellExtensionInfo>(),
+        0,
+        0,
+        evidenceState);
+}
+
+public sealed record KnownFolderRedirect(
+    string KnownFolder,
+    string Path,
+    bool RedirectedIntoCloudRoot);
+
+public sealed record MappedDrive(
+    string Letter,
+    string RemotePath,
+    string Status,
+    bool? Reachable);
+
+/// <summary>
+/// The shape of the file namespace an open-file dialog actually lands in.
+///
+/// Every native open-file dialog defaults to Documents. If Documents has been redirected into a cloud-synced
+/// root (OneDrive Known Folder Move), then every dialog enumerates a cloud-backed folder through the Cloud
+/// Files filter plus the whole security filter stack, and a single dehydrated placeholder can block it on a
+/// network round-trip. A dead mapped drive does the same thing. Neither was previously collected.
+/// </summary>
+public sealed record FileSystemContext(
+    DateTimeOffset Timestamp,
+    IReadOnlyList<KnownFolderRedirect> KnownFolders,
+    IReadOnlyList<MappedDrive> MappedDrives,
+    int DehydratedPlaceholderCount,
+    string EvidenceState)
+{
+    public static FileSystemContext Unavailable(string evidenceState) => new(
+        DateTimeOffset.UtcNow,
+        Array.Empty<KnownFolderRedirect>(),
+        Array.Empty<MappedDrive>(),
+        0,
+        evidenceState);
+}
+
+/// <summary>
+/// A single composite capture taken while the machine is actually lagging.
+///
+/// Every capture this project has ever taken was recorded while the machine was fine, and every one of them
+/// produced an authoritative-looking report that could not test the hypotheses that mattered. This record is
+/// the answer to that: one command, fired the instant the freeze is felt, that grabs the driver trace, the
+/// memory state, the filter stack and the shell state together, so the evidence is contemporaneous with the
+/// symptom rather than with a calm moment hours away from it.
+/// </summary>
+public sealed record FreezeCapture(
+    DateTimeOffset StartedAt,
+    DateTimeOffset FinishedAt,
+    string? Note,
+    SystemPressureSnapshot SystemPressure,
+    MemoryPressureDetail Memory,
+    FilterDriverStack FilterStack,
+    FileSystemContext FileSystem,
+    ShellResponsiveness Shell,
+    HostContext HostContext,
+    TelemetrySnapshot Telemetry,
+    DriverLatencyAttribution DriverLatency,
+    IReadOnlyList<Hypothesis> Hypotheses,
+    EvidenceQuality EvidenceQuality,
+    IReadOnlyList<Finding> Findings);
+
 public sealed record Hypothesis(
     HypothesisKind Kind,
     HypothesisVerdict Verdict,
@@ -347,6 +576,14 @@ public sealed record DiagnosticReport(
     EvidenceQuality? EvidenceQuality = null,
     DriverLatencyAttribution? DriverLatency = null);
 
+/// <summary>
+/// One tick of the watch recorder.
+///
+/// <see cref="Memory"/> is null on most samples by design. Memory accounting walks the process table, which
+/// costs far more than a counter read, so it is sampled on its own slower cadence and attached only to the
+/// ticks that carried it. Anything reading this series must treat a null as "not sampled here", never as
+/// "no memory pressure".
+/// </summary>
 public sealed record WatchSample(
     DateTimeOffset Timestamp,
     double TimerDriftMilliseconds,
@@ -354,7 +591,8 @@ public sealed record WatchSample(
     SystemPressureSnapshot SystemPressure,
     string? ForegroundProcess,
     HostContext? HostContext = null,
-    ShellResponsiveness? ShellResponsiveness = null);
+    ShellResponsiveness? ShellResponsiveness = null,
+    MemoryPressureDetail? Memory = null);
 
 public sealed record WatchMarker(
     DateTimeOffset Timestamp,

@@ -10,7 +10,11 @@ public sealed record HypothesisInputs(
     ShellResponsiveness? Shell,
     EvidenceQuality EvidenceQuality,
     double? MaxTimerDriftMilliseconds = null,
-    DriverLatencyAttribution? DriverLatency = null);
+    DriverLatencyAttribution? DriverLatency = null,
+    MemoryPressureDetail? Memory = null,
+    FilterDriverStack? FilterStack = null,
+    ShellExtensionInventory? ShellExtensions = null,
+    FileSystemContext? FileSystem = null);
 
 /// <summary>
 /// Ranks candidate causes of desktop lag.
@@ -127,11 +131,16 @@ public sealed class HypothesisEngine
         var score = 0;
 
         var telemetry = inputs.Telemetry;
-        var oneDriveRunning = telemetry.OneDriveProcesses.Count > 0;
+        var logChurn = telemetry.OneDriveLogFilesChangedLastMinute;
+
+        // Log churn vetoes a failed process-name match. If OneDrive's log store is being written to, the sync
+        // engine is running, whatever the process enumeration decided. A capture once reported "OneDrive was
+        // not running" while OneDrive wrote a .odl file two seconds later, and that claim gates this entire
+        // hypothesis — so it must not rest on a single unchecked signal.
+        var oneDriveRunning = telemetry.OneDriveProcesses.Count > 0 || logChurn > 0;
         var oneDriveCpu = telemetry.OneDriveProcesses
             .Where(process => process.CpuPercent.HasValue)
             .Sum(process => process.CpuPercent.GetValueOrDefault());
-        var logChurn = telemetry.OneDriveLogFilesChangedLastMinute;
 
         var totalItems = inputs.Inventories.Sum(inventory => inventory.TotalItems);
         var highRiskDirectories = inputs.Inventories.Sum(inventory => inventory.HighRiskDirectories.Count);
@@ -593,6 +602,18 @@ public sealed class HypothesisEngine
                 : "No action. The CPU is not contended.");
     }
 
+    private const long GB = 1024L * 1024 * 1024;
+    private const long MB = 1024L * 1024;
+
+    /// <summary>
+    /// Memory pressure, scored on the terms that actually predict a freeze.
+    ///
+    /// The previous version scored this hypothesis ZERO on a machine sitting at 96% commit with 1.5 GB of
+    /// headroom, because its gates were absolute: available memory had to fall under 1024 MB, and commit had
+    /// to reach 90%. Both are wrong on a 16 GB laptop. What matters is headroom in bytes, headroom as a
+    /// fraction of the machine, whether the machine is actually hard-faulting, and — decisively — whether
+    /// Windows has already named a leaking process or is holding commit that no process accounts for.
+    /// </summary>
     private static Hypothesis EvaluateMemoryPaging(HypothesisInputs inputs)
     {
         var supporting = new List<string>();
@@ -601,52 +622,180 @@ public sealed class HypothesisEngine
 
         var signals = inputs.Pressure.Signals ?? Array.Empty<PerformanceSignal>();
         var availableMb = PressureClassifier.Value(signals, "memory-available-mb");
-        var commit = PressureClassifier.Value(signals, "memory-commit-percent");
         var paging = PressureClassifier.Value(signals, "paging-file-usage-percent");
 
-        if (availableMb <= 512)
+        // The hard-fault rate is the direct measurement of "the UI thread is blocked waiting on the page
+        // file". A user whose clicks queue up and then replay in a burst is describing exactly this, and it
+        // is the difference between memory being merely tight and memory being the thing that froze the
+        // machine. Nothing else in this engine measures it.
+        var pageReads = PressureClassifier.Value(signals, "memory-page-reads-per-second");
+
+        var memory = inputs.Memory;
+        var commit = memory?.CommitPercent ?? PressureClassifier.Value(signals, "memory-commit-percent");
+        var headroom = memory?.CommitHeadroomBytes;
+        var availablePercent = memory?.PhysicalAvailablePercent;
+
+        if (headroom is not null and <= 2 * GB)
         {
-            score += 40;
-            supporting.Add($"Only {availableMb:N0} MB of memory was available.");
+            var points = headroom <= 1 * GB ? 40 : 25;
+            score += points;
+            supporting.Add($"Only {headroom.Value / (double)GB:N1} GB of commit headroom remained ({FormatBytes(memory!.CommitTotalBytes)} committed of {FormatBytes(memory.CommitLimitBytes)}).");
         }
-        else if (availableMb <= 1024)
+        else if (commit >= 95)
+        {
+            score += 30;
+            supporting.Add($"Commit charge was {commit:N1}%.");
+        }
+        else if (commit >= 85)
+        {
+            score += 20;
+            supporting.Add($"Commit charge was {commit:N1}%.");
+        }
+
+        // Proportional, not absolute. 2 GB free is comfortable on a 64 GB workstation and desperate on a
+        // 16 GB laptop, and the old fixed 1024 MB gate could not tell the two apart.
+        if (availablePercent is not null and <= 20)
+        {
+            score += availablePercent <= 10 ? 25 : 15;
+            supporting.Add($"Only {availablePercent:N0}% of physical memory was available ({FormatBytes(memory!.PhysicalAvailableBytes)} of {FormatBytes(memory.PhysicalTotalBytes)}).");
+        }
+        else if (availableMb is not null and <= 1024)
         {
             score += 25;
             supporting.Add($"Only {availableMb:N0} MB of memory was available.");
         }
 
-        if (commit >= 95)
+        if (pageReads >= 100)
         {
             score += 30;
-            supporting.Add($"Commit charge was {commit:N1}%.");
+            supporting.Add($"The machine was hard-faulting at {pageReads:N0} page reads/second, so threads were blocking on the page file rather than running.");
         }
-        else if (commit >= 90)
+        else if (pageReads >= 20)
         {
-            score += 20;
-            supporting.Add($"Commit charge was {commit:N1}%.");
+            score += 15;
+            supporting.Add($"The machine was hard-faulting at {pageReads:N0} page reads/second.");
         }
 
         if (paging >= 50)
         {
-            score += 20;
+            score += 10;
             supporting.Add($"Paging file usage was {paging:N1}%.");
+        }
+
+        // Windows naming the leaking process itself is stronger evidence than any heuristic here, and it was
+        // previously not collected at all.
+        foreach (var leak in (memory?.LeakCandidates ?? Array.Empty<MemoryLeakCandidate>()).Take(3))
+        {
+            score += 25;
+            var uptime = leak.ProcessUptime is null ? string.Empty : $" after {leak.ProcessUptime.Value.TotalDays:N1} days of uptime";
+            supporting.Add($"Windows flagged `{leak.ProcessName}` as a probable memory leak{uptime} ({leak.Source}).");
+        }
+
+        foreach (var hog in (memory?.TopCommitProcesses ?? Array.Empty<ProcessCommitSample>())
+            .Where(process => process.PrivateBytes >= 2 * GB)
+            .Take(3))
+        {
+            score += 20;
+            supporting.Add($"`{hog.Name}` alone was holding {hog.PrivateBytes / (double)GB:N1} GB of commit.");
+        }
+
+        AddUnaccountedCommitEvidence(memory, supporting, ref score);
+
+        if (memory?.SystemUptime is { TotalDays: >= 5 } uptimeDays && score >= PossibleThreshold)
+        {
+            supporting.Add($"The machine had been up for {uptimeDays.TotalDays:N1} days, so a slow leak has had time to accumulate. Rebooting and watching how fast commit climbs again is the cheapest way to confirm one.");
         }
 
         if (score == 0)
         {
-            opposing.Add($"Available memory ({Format(availableMb)} MB) and commit charge ({Format(commit)}%) were both healthy.");
+            opposing.Add(headroom is not null
+                ? $"Commit headroom ({headroom.Value / (double)GB:N1} GB) and available memory were both healthy, and the machine was not hard-faulting."
+                : $"Available memory ({Format(availableMb)} MB) and commit charge ({Format(commit)}%) were both healthy.");
         }
 
         return new Hypothesis(
             HypothesisKind.MemoryPaging,
             Verdict(score, inputs.EvidenceQuality),
             score,
-            "The machine is short on memory and hard-faulting, so everything waits on the page file.",
+            "The machine is short on memory and hard-faulting, so everything waits on the page file. Input queues up while UI threads block, then replays in a burst when the page arrives.",
             supporting,
             opposing,
-            score >= PossibleThreshold
-                ? "Close the largest memory consumers, or add RAM. Hard faults, not CPU, are the bottleneck here."
-                : "No action. Memory is not under pressure.");
+            NextStepForMemory(memory, score));
+    }
+
+    /// <summary>
+    /// Commit that no user-mode process accounts for is the number that decides where a leak lives, and it is
+    /// the one thing Task Manager cannot show you: its Details tab lists only user-mode processes, so a driver
+    /// leaking kernel pool consumes commit while appearing nowhere. Closing every application does not return
+    /// that memory, which is precisely the experience that sends people hunting the wrong process.
+    /// </summary>
+    private static void AddUnaccountedCommitEvidence(MemoryPressureDetail? memory, List<string> supporting, ref int score)
+    {
+        if (memory?.UnaccountedCommitBytes is not { } unaccounted || memory.CommitTotalBytes is not { } committed || committed <= 0)
+        {
+            return;
+        }
+
+        // A negative figure means the accounting itself is unreliable — processes were sampled at a different
+        // instant, or the biggest consumers were inaccessible. Say nothing rather than accuse a driver.
+        if (unaccounted <= 0)
+        {
+            return;
+        }
+
+        var accountingIsThin = memory.ProcessesInaccessible is > 0 && memory.ProcessesSampled is > 0
+            && memory.ProcessesInaccessible.Value * 10 >= memory.ProcessesSampled.Value;
+
+        if (unaccounted < 4 * GB || unaccounted * 2 < committed)
+        {
+            return;
+        }
+
+        score += accountingIsThin ? 15 : 30;
+
+        var caveat = accountingIsThin
+            ? $" This figure is unreliable: {memory.ProcessesInaccessible} of {memory.ProcessesSampled} processes could not be read, so some of it may belong to a process rather than the kernel. Re-run elevated."
+            : " No application holds this memory, so closing applications will not return it.";
+
+        var pool = memory.KernelPoolBytes is { } poolBytes
+            ? $" Kernel pool accounted for {poolBytes / (double)GB:N1} GB of it (paged {FormatBytes(memory.KernelPagedPoolBytes)}, non-paged {FormatBytes(memory.KernelNonPagedPoolBytes)})."
+            : string.Empty;
+
+        supporting.Add(
+            $"{unaccounted / (double)GB:N1} GB of committed memory is not accounted for by any user-mode process.{pool}{caveat}");
+    }
+
+    private static string NextStepForMemory(MemoryPressureDetail? memory, int score)
+    {
+        if (score < PossibleThreshold)
+        {
+            return "No action. Memory is not under pressure.";
+        }
+
+        if (memory?.UnaccountedCommitBytes is { } unaccounted && unaccounted >= 4 * GB)
+        {
+            return "Most of the committed memory belongs to no process, which points at a kernel/driver leak rather than an application. Run `poolmon` or Sysinternals RAMMap (Use Counts) to name the pool tag and the driver holding it. Rebooting will clear it, but it will come back.";
+        }
+
+        if (memory?.LeakCandidates.Count > 0)
+        {
+            var names = string.Join(", ", memory.LeakCandidates.Select(leak => leak.ProcessName).Distinct().Take(3));
+            return $"Windows has already named the suspect: {names}. Restart that process (or reboot) and watch how quickly its private bytes climb again. A leak reappears on a schedule; a one-off does not.";
+        }
+
+        return "Close or restart the largest committers, or add RAM. Hard faults, not CPU, are the bottleneck here.";
+    }
+
+    private static string FormatBytes(long? bytes)
+    {
+        if (bytes is null)
+        {
+            return "unknown";
+        }
+
+        return bytes.Value >= GB
+            ? $"{bytes.Value / (double)GB:N1} GB"
+            : $"{bytes.Value / (double)MB:N0} MB";
     }
 
     private static Hypothesis EvaluateShellExtensionBlocking(HypothesisInputs inputs)
@@ -692,6 +841,28 @@ public sealed class HypothesisEngine
             supporting.Add($"{shell.HungTopLevelWindows:N0} top-level window(s) were hung.");
         }
 
+        // Icon overlay handlers run synchronously on the shell's UI thread, and Windows honours only the
+        // first ~15 in sort order. A crowded list is both a latency cost on every directory listing and a
+        // silent correctness bug, since the handlers past the cut simply never run.
+        var extensions = inputs.ShellExtensions;
+        if (extensions is not null && extensions.Extensions.Count > 0)
+        {
+            if (extensions.IconOverlayCount > ShellExtensionInventory.IconOverlayLimit)
+            {
+                score += 20;
+                supporting.Add($"{extensions.IconOverlayCount:N0} icon overlay handlers are registered, above the {ShellExtensionInventory.IconOverlayLimit} Windows will actually honour. They run synchronously on the Explorer UI thread, and the ones past the limit are silently ignored.");
+            }
+            else if (extensions.ThirdPartyIconOverlayCount >= 5)
+            {
+                score += 10;
+                supporting.Add($"{extensions.ThirdPartyIconOverlayCount:N0} third-party icon overlay handlers run synchronously on the Explorer UI thread on every directory listing.");
+            }
+        }
+        else if (shell.ShellWindowHung is not null)
+        {
+            opposing.Add("Registered shell extensions could not be enumerated, so overlay-handler overhead is untested rather than absent.");
+        }
+
         if (score == 0)
         {
             opposing.Add($"The Explorer shell answered a null message in {Format(shell.ShellPumpLatencyMilliseconds)} ms and is pumping messages normally.");
@@ -705,10 +876,21 @@ public sealed class HypothesisEngine
             supporting,
             opposing,
             score >= PossibleThreshold
-                ? "Disable non-Microsoft shell extensions one at a time (OneDrive status overlays, cloud storage clients, archivers, antivirus context menus) and re-test."
+                ? "Disable non-Microsoft shell extensions one at a time with Autoruns or ShellExView (OneDrive status overlays, cloud storage clients, archivers, antivirus context menus) and re-test. Start with the icon overlay handlers — they are the ones on the UI thread."
                 : "No action. Explorer is pumping messages normally.");
     }
 
+    /// <summary>
+    /// Security and indexing overhead.
+    ///
+    /// This hypothesis used to look only at the CPU of Defender, Windows Search and Windows Update servicing.
+    /// That made it structurally incapable of seeing the most expensive case there is: a machine carrying a
+    /// large third-party endpoint-security stack. Those filters cost almost nothing in CPU — they cost
+    /// *latency*, synchronously, on every file open. An open-file dialog performs one open per file just to
+    /// draw an icon, so the bill lands on Explorer and file dialogs while the rest of the desktop looks fine,
+    /// and a CPU-only collector reports zero. A real machine running eleven third-party kernel drivers, six of
+    /// them file-system minifilters, with Defender's own filter switched off, scored zero here.
+    /// </summary>
     private static Hypothesis EvaluateSecurityOrSearchScanner(HypothesisInputs inputs)
     {
         var supporting = new List<string>();
@@ -735,7 +917,53 @@ public sealed class HypothesisEngine
             supporting.Add("A scanner or indexer was active while the disk was saturated.");
         }
 
-        if (score == 0)
+        var stack = inputs.FilterStack;
+        var stackMeasured = stack is not null && stack.Filters.Count > 0;
+
+        if (stackMeasured)
+        {
+            var thirdParty = stack!.ThirdPartyFileSystemFilterCount;
+
+            if (thirdParty >= 6)
+            {
+                score += 35;
+                supporting.Add($"{thirdParty:N0} third-party file-system filter drivers are attached. Every file open traverses all of them synchronously, and an open-file dialog performs one open per file just to draw its icon.");
+            }
+            else if (thirdParty >= 3)
+            {
+                score += 20;
+                supporting.Add($"{thirdParty:N0} third-party file-system filter drivers are attached, and every file open traverses all of them.");
+            }
+
+            if (stack.SecurityVendors.Count > 0)
+            {
+                supporting.Add($"Endpoint security filters from {string.Join(", ", stack.SecurityVendors)} are in the file I/O path.");
+            }
+
+            // Defender's filter going passive is the expected, correct behaviour once a third-party AV
+            // registers. It is not a defect. What it *does* mean is that the third-party stack now performs
+            // 100% of real-time scanning, so its cost is the whole cost.
+            if (stack.DefenderFilterRunning == false && thirdParty > 0)
+            {
+                score += 10;
+                supporting.Add("Microsoft Defender's real-time filter is passive, so the third-party stack is performing all real-time file scanning.");
+            }
+
+            if (stack.CloudFilesFilterRunning == true)
+            {
+                supporting.Add("The OneDrive Cloud Files filter is also attached, adding cloud-placeholder handling to the same per-file path.");
+            }
+        }
+        else
+        {
+            opposing.Add("The file-system filter stack could not be enumerated, so third-party security overhead is untested rather than absent. `fltmc` needs an elevated terminal.");
+        }
+
+        if (score == 0 && stackMeasured)
+        {
+            opposing.Add("Defender, Windows Search, and Windows Update servicing were quiet, and no significant third-party filter stack is attached.");
+        }
+        else if (score == 0)
         {
             opposing.Add("Defender, Windows Search, and Windows Update servicing processes were not consuming meaningful CPU.");
         }
@@ -744,12 +972,35 @@ public sealed class HypothesisEngine
             HypothesisKind.SecurityOrSearchScanner,
             Verdict(score, inputs.EvidenceQuality),
             score,
-            "Defender, Windows Search, or Windows Update servicing is scanning in the background and saturating CPU or disk.",
+            "Security scanning or indexing is taxing the machine — either burning CPU in the background, or adding synchronous latency to every file operation through the filter-driver stack.",
             supporting,
             opposing,
-            score >= PossibleThreshold
-                ? "Check whether a full Defender scan or a Search index rebuild is in progress, and let it finish before drawing conclusions. Add build and dependency folders to Defender exclusions if they are being rescanned."
-                : "No action. Background scanners are quiet.");
+            NextStepForScanner(stack, scanners.Length > 0, score));
+    }
+
+    private static string NextStepForScanner(FilterDriverStack? stack, bool scannersBusy, int score)
+    {
+        if (score < PossibleThreshold)
+        {
+            return "No action. Background scanners are quiet.";
+        }
+
+        if (stack is not null && stack.ThirdPartyFileSystemFilterCount >= 3)
+        {
+            var vendors = stack.SecurityVendors.Count > 0
+                ? string.Join(", ", stack.SecurityVendors)
+                : "the third-party filters";
+
+            // Deliberately does not suggest removing or disabling the security stack. On a managed device that
+            // is usually blocked outright by the vendor's own self-protection driver, and where it is not, it
+            // is a compliance violation that leaves the machine with no antivirus at all. The honest next step
+            // is to measure the cost and hand the evidence to whoever owns the endpoint.
+            return $"Test the file path directly: open a file dialog in a purely local folder (for example C:\\Temp), then in Documents. If local is fast and Documents is slow, the per-file cost is real. To attribute it, run Process Monitor against explorer.exe while opening a dialog. Do not uninstall or disable {vendors} — on a managed device that is typically blocked by the vendor's self-protection driver and leaves you with no antivirus. Take the measurement to whoever administers the endpoint and ask for a repair/reinstall.";
+        }
+
+        return scannersBusy
+            ? "Check whether a full Defender scan or a Search index rebuild is in progress, and let it finish before drawing conclusions. Add build and dependency folders to Defender exclusions if they are being rescanned."
+            : "Re-run from an elevated terminal so the filter-driver stack can be enumerated.";
     }
 
     private static Hypothesis EvaluateThermalOrPower(HypothesisInputs inputs)
