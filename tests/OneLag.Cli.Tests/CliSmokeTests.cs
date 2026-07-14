@@ -67,7 +67,19 @@ public sealed class CliSmokeTests : IDisposable
     {
         var watchRoot = Path.Combine(tempRoot, "watch");
 
-        var start = await RunCli("watch", "start", "--duration", "1s", "--interval", "1s", "--output", watchRoot);
+        // The collectors are all unavailable off Windows, so the pre-flight refuses to start unless the run is
+        // knowingly acknowledged as degraded. That refusal is asserted on its own below; here we are exercising
+        // the recorder, so the acknowledgement is given explicitly.
+        var start = await RunCli(
+            "watch",
+            "start",
+            "--duration",
+            "1s",
+            "--interval",
+            "1s",
+            "--output",
+            watchRoot,
+            "--i-understand-collectors-are-degraded");
         Assert.Equal(0, start.ExitCode);
         Assert.True(File.Exists(Path.Combine(watchRoot, "samples.ndjson")));
 
@@ -88,6 +100,57 @@ public sealed class CliSmokeTests : IDisposable
         Assert.Equal(0, view.ExitCode);
         Assert.Contains("Kind: Watch", view.StandardOutput);
         Assert.Contains("lag-marker", view.StandardOutput);
+    }
+
+    /// <summary>
+    /// The load-bearing behaviour of the pre-flight: an all-day run whose collectors are degraded produces an
+    /// authoritative-looking report containing nothing, and it costs a working day to find that out.
+    ///
+    /// This asserts the invariant that holds on every machine — watch either records, or refuses with an
+    /// actionable message and a non-zero exit — rather than asserting a refusal, which only happens when the
+    /// collectors are actually degraded. An earlier version of this test hard-coded the refusal and passed on
+    /// macOS while failing on Windows CI, whose agents run elevated: it was asserting what the runner was, not
+    /// what the code did. The refusal decision itself is pure and is covered exhaustively in WatchPreflightTests.
+    /// </summary>
+    [Fact]
+    public async Task WatchStartEitherRecordsOrRefusesLoudly()
+    {
+        var watchRoot = Path.Combine(tempRoot, "watch-preflight");
+
+        var start = await RunCli("watch", "start", "--duration", "1s", "--interval", "1s", "--output", watchRoot);
+        var samples = Path.Combine(watchRoot, "samples.ndjson");
+
+        if (start.ExitCode == 0)
+        {
+            Assert.True(File.Exists(samples), "watch start reported success but wrote no samples.");
+            return;
+        }
+
+        // Refusal must be actionable and must never be a silent no-op, and it must never prompt — a CI job
+        // like this one would hang on a prompt.
+        Assert.Contains("REFUSING TO START", start.StandardError, StringComparison.Ordinal);
+        Assert.Contains("i-understand-collectors-are-degraded", start.StandardError, StringComparison.Ordinal);
+        Assert.False(File.Exists(samples), "watch start refused but recorded samples anyway.");
+    }
+
+    [Fact]
+    public async Task WatchStartRecordsWhenDegradedCollectorsAreAcknowledged()
+    {
+        var watchRoot = Path.Combine(tempRoot, "watch-acknowledged");
+
+        var start = await RunCli(
+            "watch",
+            "start",
+            "--duration",
+            "1s",
+            "--interval",
+            "1s",
+            "--output",
+            watchRoot,
+            "--i-understand-collectors-are-degraded");
+
+        Assert.Equal(0, start.ExitCode);
+        Assert.True(File.Exists(Path.Combine(watchRoot, "samples.ndjson")));
     }
 
     [Fact]

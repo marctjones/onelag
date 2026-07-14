@@ -12,6 +12,42 @@ public sealed record WatchStartOptions(
     int MaxSamples = 14_400)
 {
     public TimeSpan HostContextInterval { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Memory accounting walks the whole process table, which is far more expensive than the counter reads the
+    /// loop does every tick. This tool is diagnosing a machine that is already starved, so a watcher that costs
+    /// real CPU corrupts the very measurement it is taking. Thirty seconds is fast enough to see a leak that
+    /// takes hours (the thing we are looking for) and slow enough to be invisible against the workload.
+    /// </summary>
+    public TimeSpan MemoryInterval { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// The number of processes retained per memory sample. Bounded because an 8-hour recording of a full
+    /// process table would be gigabytes of JSONL on a machine that is short of resources; ten is enough to
+    /// carry every plausible leaker, and the unaccounted-commit figure — which is what names a kernel leak — is
+    /// computed from every process before the list is truncated, so the cap cannot hide it.
+    /// </summary>
+    public int MaxCommitProcessesPerSample { get; init; } = 10;
+
+    /// <summary>
+    /// On by default, and that is the point of the feature: the user cannot tag a freeze while frozen, because
+    /// the freeze is precisely what stops him acting. The watcher detects it and captures it unattended.
+    /// </summary>
+    public bool AutoCapture { get; init; } = true;
+
+    /// <summary>
+    /// Off by default. A kernel ETW trace holds a session open for ten seconds and costs more than everything
+    /// else the loop does put together; firing that unattended, inside a sampling loop, on a machine that is
+    /// already stalling would make the watcher part of the problem. Opt in when you are specifically hunting a
+    /// driver and can accept the cost.
+    /// </summary>
+    public bool AutoCaptureDriverTrace { get; init; }
+
+    public TimeSpan AutoCaptureTraceDuration { get; init; } = TimeSpan.FromSeconds(10);
+
+    public TimeSpan AutoCaptureCooldown { get; init; } = TimeSpan.FromMinutes(2);
+
+    public int MaxAutoCaptures { get; init; } = 20;
 }
 
 public sealed record WatchState(
@@ -72,6 +108,19 @@ public sealed class WatchService
         HostContext? hostContext = null;
         var hostContextAge = Stopwatch.StartNew();
 
+        // Memory is the second reason this loop exists. A single snapshot cannot tell a leak from a large but
+        // stable process; only a series can. It is sampled on its own slower cadence for the reason given on
+        // MemoryInterval, and attached to whichever tick happened to carry it.
+        MemoryPressureDetail? memory = null;
+        Stopwatch? memoryAge = null;
+
+        var detector = new FreezeDetector(new FreezeDetectorOptions
+        {
+            DeepCaptureCooldown = options.AutoCaptureCooldown,
+            MaxDeepCaptures = options.MaxAutoCaptures
+        });
+        var freezeCapture = new FreezeCaptureService(platform);
+
         WriteState(statePath, new WatchState("running", startedAt, DateTimeOffset.UtcNow, directory, sampleCount));
 
         while (!cancellationToken.IsCancellationRequested && DateTimeOffset.UtcNow - startedAt < options.Duration)
@@ -95,6 +144,16 @@ public sealed class WatchService
                 hostContextAge.Restart();
             }
 
+            // Sampled memory is attached only to the tick that took it. Every other sample carries a null, which
+            // readers must treat as "not measured here" rather than as an absence of pressure.
+            MemoryPressureDetail? sampledMemory = null;
+            if (memoryAge is null || memoryAge.Elapsed >= options.MemoryInterval)
+            {
+                memory = Trim(platform.CaptureMemoryPressure(), options.MaxCommitProcessesPerSample);
+                memoryAge = Stopwatch.StartNew();
+                sampledMemory = memory;
+            }
+
             var sample = new WatchSample(
                 DateTimeOffset.UtcNow,
                 drift,
@@ -102,10 +161,23 @@ public sealed class WatchService
                 platform.CaptureSystemPressure(),
                 platform.GetForegroundProcessName(),
                 hostContext,
-                platform.CaptureShellResponsiveness());
+                platform.CaptureShellResponsiveness(),
+                sampledMemory);
 
             AppendJsonLine(samplesPath, sample);
             sampleCount++;
+
+            if (options.AutoCapture)
+            {
+                // The detector is fed the most recent memory reading even on ticks that did not sample it: a
+                // freeze must be judged against what the machine is holding now, not against a null.
+                AutoCapture(
+                    detector.Evaluate(sample with { Memory = sampledMemory ?? memory }),
+                    directory,
+                    freezeCapture,
+                    options,
+                    cancellationToken);
+            }
 
             if (sampleCount > options.MaxSamples)
             {
@@ -120,6 +192,82 @@ public sealed class WatchService
         var state = new WatchState("stopped", startedAt, stoppedAt, directory, sampleCount);
         WriteState(statePath, state);
         return new WatchRunSummary(directory, startedAt, stoppedAt, sampleCount, state.State);
+    }
+
+    /// <summary>
+    /// Writes the marker and, unless debounced, the deep capture for one auto-detected freeze.
+    ///
+    /// The marker is written for every detection, even when the capture itself is suppressed, because the
+    /// report is rebuilt from this directory long after the run exited: a detection that leaves no trace is a
+    /// detection that never happened as far as the user can tell.
+    ///
+    /// Deep captures are separate files, not samples, so the ring-buffer trim that bounds the time series can
+    /// never discard the one artifact the whole session existed to produce. Failures here are swallowed on
+    /// purpose — a capture that throws (an unreadable process, a denied handle) must not end an all-day
+    /// recording that is still collecting the memory series.
+    /// </summary>
+    private static void AutoCapture(
+        FreezeDetection detection,
+        string directory,
+        FreezeCaptureService freezeCapture,
+        WatchStartOptions options,
+        CancellationToken cancellationToken)
+    {
+        if (!detection.Triggered)
+        {
+            return;
+        }
+
+        try
+        {
+            AppendJsonLine(
+                GetMarkersPath(directory),
+                new WatchMarker(DateTimeOffset.UtcNow, FreezeDetector.AutoMarkerSource, $"{detection.Trigger}: {detection.Note}"));
+
+            if (!detection.ShouldCapture)
+            {
+                return;
+            }
+
+            var capture = freezeCapture.Capture(
+                new FreezeCaptureOptions(
+                    options.AutoCaptureTraceDuration,
+                    $"Auto-detected freeze ({detection.Trigger}). {detection.Note}",
+                    SkipDriverTrace: !options.AutoCaptureDriverTrace),
+                cancellationToken);
+
+            var path = Path.Combine(directory, $"freeze-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss-fff}.json");
+            File.WriteAllText(path, FreezeReportWriter.ToJson(capture));
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            // Best effort: losing one capture is survivable, losing the session is not.
+        }
+    }
+
+    /// <summary>
+    /// Bounds what each memory sample costs on disk. The commit accounting itself (including the unaccounted
+    /// figure that names a kernel leak) is computed by the probe over every process before this runs, so
+    /// truncating the retained list cannot change any conclusion about where the memory went.
+    /// </summary>
+    private static MemoryPressureDetail Trim(MemoryPressureDetail memory, int maxProcesses)
+    {
+        if (memory.TopCommitProcesses.Count <= maxProcesses)
+        {
+            return memory;
+        }
+
+        return memory with
+        {
+            TopCommitProcesses = memory.TopCommitProcesses
+                .OrderByDescending(process => process.PrivateBytes)
+                .Take(maxProcesses)
+                .ToArray()
+        };
     }
 
     public void RequestStop(string outputDirectory)
@@ -215,6 +363,9 @@ public sealed class WatchService
             }
         }
 
+        AppendMemoryTrend(lines, samples);
+        AppendAutoDetectedFreezes(lines, samples, markers);
+
         lines.Add(string.Empty);
         lines.Add("## Markers");
         foreach (var marker in markers)
@@ -262,6 +413,139 @@ public sealed class WatchService
     }
 
     /// <summary>
+    /// The section that needs no action from the user at all.
+    ///
+    /// A freeze has to be caught in the act, but a leak announces itself over hours whether anyone is watching
+    /// or not — and it is the harder thing to see, because the process holding the most memory is almost never
+    /// the one taking it. This section reports growth rates, and where the growth belongs to no process at all
+    /// it says so in the plainest terms available, because that case (a driver holding kernel pool) is
+    /// invisible in every tool the user already has.
+    /// </summary>
+    private static void AppendMemoryTrend(List<string> lines, IReadOnlyList<WatchSample> samples)
+    {
+        const double MB = 1024 * 1024;
+        const double GB = 1024 * MB;
+
+        var trend = MemoryTrendAnalyzer.Analyze(samples);
+
+        lines.Add(string.Empty);
+        lines.Add("## Memory Trend");
+        lines.Add(string.Empty);
+
+        if (!trend.HasSufficientData)
+        {
+            lines.Add(trend.Summary);
+            return;
+        }
+
+        lines.Add($"Measured over `{trend.MemorySamples:N0}` memory samples spanning `{trend.Span:hh\\:mm\\:ss}`. Rates are least-squares fits over every sample, not first-versus-last, so a single spike cannot become a trend.");
+        lines.Add(string.Empty);
+
+        if (trend.Commit is { } commit)
+        {
+            lines.Add($"- Committed memory: `{commit.StartBytes / GB:N1} GB` to `{commit.EndBytes / GB:N1} GB` (`{commit.DeltaBytes / MB:N0} MB`), growing at `{commit.MegabytesPerHour:N0} MB/hour`");
+        }
+
+        if (trend.UnaccountedCommit is { } unaccounted)
+        {
+            lines.Add($"- Commit belonging to no user-mode process: `{unaccounted.StartBytes / GB:N1} GB` to `{unaccounted.EndBytes / GB:N1} GB`, growing at `{unaccounted.MegabytesPerHour:N0} MB/hour`");
+        }
+
+        lines.Add(string.Empty);
+
+        if (trend.KernelLeakSuspected)
+        {
+            lines.Add("### This is a kernel or driver leak, not an application leak");
+            lines.Add(string.Empty);
+            lines.Add(trend.Summary);
+            lines.Add(string.Empty);
+            lines.Add("Closing applications will not return this memory, and rebooting is the only thing that will. Task Manager's Details tab lists user-mode processes only, so memory a driver holds in kernel pool appears nowhere in it while still consuming commit — which is why this can only be seen by measuring what every process accounts for and subtracting it from what the machine has committed.");
+            lines.Add(string.Empty);
+            lines.Add("Next step: run `poolmon` or Sysinternals RAMMap (Use Counts tab) to name the pool tag, then map the tag to the driver holding it. On a machine carrying third-party kernel drivers, that is where to look first.");
+            lines.Add(string.Empty);
+        }
+
+        lines.Add("### Fastest-growing processes");
+        lines.Add(string.Empty);
+        lines.Add("Ranked by growth rate, not by size. A large process that stays flat is not a leak; a small one that climbs is.");
+        lines.Add(string.Empty);
+
+        if (trend.GrowingProcesses.Count == 0)
+        {
+            lines.Add($"- No process grew faster than `{MemoryTrendAnalyzer.ProcessGrowthNoiseFloorMegabytesPerHour:N0} MB/hour`, the floor below which ordinary heap and cache behaviour is indistinguishable from a leak.");
+        }
+        else
+        {
+            lines.Add("| Process | PID | Growth | Start | End | Samples |");
+            lines.Add("| --- | --- | --- | --- | --- | --- |");
+            foreach (var process in trend.GrowingProcesses.Take(10))
+            {
+                lines.Add($"| `{process.Name}` | {process.ProcessId} | {process.MegabytesPerHour:N0} MB/hour | {process.StartBytes / MB:N0} MB | {process.EndBytes / MB:N0} MB | {process.Samples:N0} |");
+            }
+        }
+
+        if (trend.WindowsLeakCandidates.Count > 0)
+        {
+            lines.Add(string.Empty);
+            lines.Add("### Leak candidates named by Windows");
+            lines.Add(string.Empty);
+            lines.Add("Windows' own leak detectors, not a OneLag heuristic.");
+            foreach (var candidate in trend.WindowsLeakCandidates)
+            {
+                lines.Add($"- `{candidate.ProcessName}` flagged by `{candidate.Source}` at `{candidate.ObservedAt:O}`");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Correlates each freeze the watcher detected on its own against what the machine's memory was doing at
+    /// that moment. Markers land on the tick that tripped the detector, which usually carries no memory reading
+    /// of its own, so the nearest memory-bearing sample is used.
+    /// </summary>
+    private static void AppendAutoDetectedFreezes(List<string> lines, IReadOnlyList<WatchSample> samples, IReadOnlyList<WatchMarker> markers)
+    {
+        const double MB = 1024 * 1024;
+
+        var auto = markers.Where(marker => marker.Source == FreezeDetector.AutoMarkerSource).ToArray();
+
+        lines.Add(string.Empty);
+        lines.Add("## Auto-Detected Freezes");
+        lines.Add(string.Empty);
+
+        if (auto.Length == 0)
+        {
+            lines.Add("- The watcher detected no freeze on its own during this session.");
+            return;
+        }
+
+        var memorySamples = samples.Where(sample => sample.Memory is not null).ToArray();
+        lines.Add($"`{auto.Length:N0}` freeze(s) were detected and recorded without the user having to act.");
+        lines.Add(string.Empty);
+
+        foreach (var marker in auto)
+        {
+            var nearest = memorySamples
+                .OrderBy(sample => Math.Abs((sample.Timestamp - marker.Timestamp).Ticks))
+                .FirstOrDefault();
+
+            var memory = nearest?.Memory;
+            var state = memory?.CommitTotalBytes is null
+                ? "memory not sampled"
+                : $"committed {memory.CommitTotalBytes.Value / MB:N0} MB, headroom {(memory.CommitHeadroomBytes.HasValue ? $"{memory.CommitHeadroomBytes.Value / MB:N0} MB" : "unknown")}, unaccounted {(memory.UnaccountedCommitBytes.HasValue ? $"{memory.UnaccountedCommitBytes.Value / MB:N0} MB" : "unknown")}";
+
+            lines.Add($"- `{marker.Timestamp:O}`: {marker.Note} (memory at that time: {state})");
+        }
+
+        // A cap that hides what it dropped reads as "this only happened twenty times", which would be false.
+        var dropped = auto.Count(marker => marker.Note?.Contains(FreezeDetector.CapSkipToken, StringComparison.Ordinal) == true);
+        if (dropped > 0)
+        {
+            lines.Add(string.Empty);
+            lines.Add($"**`{dropped:N0}` detected freeze(s) did not get a deep capture: the per-run cap on deep captures was reached.** The freezes above still happened and are all recorded; only the expensive capture was skipped. The machine froze more often than the number of `freeze-*.json` files in this directory.");
+        }
+    }
+
+    /// <summary>
     /// Recovers the recording cadence from the samples themselves so a report can be rebuilt from a
     /// directory without knowing what interval the session was started with.
     /// </summary>
@@ -302,6 +586,26 @@ public sealed class WatchService
         if (options.MaxSamples <= 0)
         {
             throw new ArgumentException("Watch max samples must be greater than zero.", nameof(options));
+        }
+
+        if (options.MemoryInterval <= TimeSpan.Zero)
+        {
+            throw new ArgumentException("Watch memory interval must be greater than zero.", nameof(options));
+        }
+
+        if (options.MaxCommitProcessesPerSample <= 0)
+        {
+            throw new ArgumentException("Watch max commit processes per sample must be greater than zero.", nameof(options));
+        }
+
+        if (options.AutoCaptureCooldown < TimeSpan.Zero)
+        {
+            throw new ArgumentException("Watch auto-capture cooldown must not be negative.", nameof(options));
+        }
+
+        if (options.MaxAutoCaptures <= 0)
+        {
+            throw new ArgumentException("Watch max auto-captures must be greater than zero.", nameof(options));
         }
     }
 

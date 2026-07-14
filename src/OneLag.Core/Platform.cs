@@ -23,6 +23,29 @@ public interface IPlatformProbe
     /// so it is never part of the default scan path.
     /// </summary>
     DriverLatencyAttribution CaptureDriverLatency(TimeSpan duration, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Enumerates the file-system filter (minifilter) stack. Every file open traverses every attached filter.
+    /// </summary>
+    FilterDriverStack CaptureFilterDriverStack();
+
+    /// <summary>
+    /// Captures commit headroom, system uptime, the top processes by private bytes, and any process Windows
+    /// itself has flagged as a leak candidate.
+    /// </summary>
+    MemoryPressureDetail CaptureMemoryPressure();
+
+    /// <summary>
+    /// Enumerates registered Explorer shell extensions, particularly icon overlay handlers, which run
+    /// synchronously on the shell UI thread.
+    /// </summary>
+    ShellExtensionInventory CaptureShellExtensions();
+
+    /// <summary>
+    /// Captures where the shell's known folders actually point and whether any mapped network drive is dead —
+    /// the two things that decide how expensive a native open-file dialog is.
+    /// </summary>
+    FileSystemContext CaptureFileSystemContext(IReadOnlyList<RootCandidate> roots);
 }
 
 public class PortablePlatformProbe : IPlatformProbe
@@ -105,6 +128,27 @@ public class PortablePlatformProbe : IPlatformProbe
         _ = duration;
         _ = cancellationToken;
         return DriverLatencyAttribution.Unavailable("unavailable-on-this-platform");
+    }
+
+    public virtual FilterDriverStack CaptureFilterDriverStack()
+    {
+        return FilterDriverStack.Unavailable("unavailable-on-this-platform");
+    }
+
+    public virtual MemoryPressureDetail CaptureMemoryPressure()
+    {
+        return MemoryPressureDetail.Unavailable("unavailable-on-this-platform");
+    }
+
+    public virtual ShellExtensionInventory CaptureShellExtensions()
+    {
+        return ShellExtensionInventory.Unavailable("unavailable-on-this-platform");
+    }
+
+    public virtual FileSystemContext CaptureFileSystemContext(IReadOnlyList<RootCandidate> roots)
+    {
+        _ = roots;
+        return FileSystemContext.Unavailable("unavailable-on-this-platform");
     }
 
     private static void AddEnvironmentRoot(Dictionary<string, RootCandidate> roots, string variableName, string accountKind)

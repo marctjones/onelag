@@ -18,10 +18,19 @@ public sealed record ProbeResult(
 
 public sealed record SelfTestReport(
     IReadOnlyList<ProbeResult> Probes,
-    EvidenceQuality Quality)
+    EvidenceQuality Quality,
+    CollectorReadinessReport Readiness)
 {
+    /// <summary>
+    /// The readiness collectors are reported separately from <see cref="Probes"/> rather than being folded into
+    /// the list, because the "three live probes" test below is a measure of whether the machine is instrumented
+    /// at all, and adding five more lines to it would let a broken machine pass on the strength of collectors
+    /// that were merely present. They gate the answer instead: a run that cannot account for its own memory or
+    /// see its own filter stack is not ready to diagnose anything, however many counters are live.
+    /// </summary>
     public bool ReadyToDiagnose => Quality.Grade != EvidenceGrade.Insufficient
-        && Probes.Count(probe => probe.Status == ProbeStatus.Live) >= 3;
+        && Probes.Count(probe => probe.Status == ProbeStatus.Live) >= 3
+        && Readiness.CanRecordLeakHunt;
 }
 
 /// <summary>
@@ -111,7 +120,14 @@ public sealed class SelfTestService
             host.Value,
             shell.Value);
 
-        return new SelfTestReport(probes, quality);
+        // The four collectors an all-day leak hunt depends on, plus elevation — which is the single fact that
+        // most determines whether any capture is worth anything, because two of the four cannot read the kernel
+        // without it. The driver trace is inferred from elevation rather than run: see CollectorReadinessCheck
+        // for why (this method runs on every GUI launch, and a 1s probe trace would mean a kernel ETW session
+        // on every launch).
+        var readiness = CollectorReadinessCheck.Evaluate(platform);
+
+        return new SelfTestReport(probes, quality, readiness);
     }
 
     private static (ProbeResult Result, T Value) Timed<T>(

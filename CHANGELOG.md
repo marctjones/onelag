@@ -2,6 +2,85 @@
 
 ## Unreleased
 
+### Catching the freeze instead of describing the calm
+
+Every capture this project had ever taken was recorded while the machine was fine. That is why nothing was
+ever diagnosed: `scan` walks a folder tree and measures exposure, `watch` had to be armed before an episode
+and marked during one, and marking a freeze requires the machine to respond at the exact moment it will not.
+
+- Added `onelag freeze`, a one-shot composite capture for the moment the machine locks up. It takes no
+  inventory and walks no directory, so it returns while the symptom is still happening: commit accounting,
+  the filter-driver stack, the shell message pump, the file namespace a dialog would land in, and an optional
+  kernel trace. It prints a TL;DR to the console, because a user mid-freeze will not open a file.
+- **`onelag watch` now detects freezes on its own, and auto-capture is on by default.** Asking a user to tag
+  a freeze is asking them to act at the one moment they cannot. `FreezeDetector` watches the sampler's own
+  starvation — the loop asks to sleep one second, and if it wakes four seconds later, the machine stalled —
+  plus shell-pump latency, commit collapse, and hard-fault rate. On detection it writes a marker naming the
+  signal that tripped and takes a deep capture, debounced and capped so one thirty-second freeze produces one
+  episode rather than thirty, and so an all-day run on a badly broken machine cannot fill the disk. Captures
+  dropped to the cap are stated in the report rather than silently omitted.
+- Added `MemoryTrendAnalyzer`, which turns an all-day watch into a leak hunt. It ranks processes **by growth
+  rate, not by size** — the leaker is the thing that grows, so a large flat process is innocent and a small
+  climbing one is guilty. It also tracks *unaccounted* commit over time: when every process stays flat and
+  commit keeps climbing, the leak is in the kernel, held by a driver, and no process list will ever show it.
+
+### Collectors the tool was missing
+
+Three hypotheses could never win, because nothing collected the evidence they needed.
+
+- Added `CaptureFilterDriverStack` (`fltmc`). `SecurityOrSearchScanner` previously looked only at Defender and
+  Windows Search **CPU**, which made it structurally incapable of seeing the expensive case: a machine
+  carrying a large third-party endpoint-security stack. Those filters cost almost nothing in CPU — they cost
+  *latency*, synchronously, on every file open. An open-file dialog performs one open per file just to draw an
+  icon, so the bill lands on Explorer and file dialogs while the rest of the desktop looks fine. A real machine
+  running eleven third-party kernel drivers, six of them file-system minifilters, with Defender's own filter
+  passive, scored zero.
+- Added `CaptureMemoryPressure`: commit headroom in bytes, kernel paged/non-paged pool, system uptime, top
+  processes by **private bytes** (not working set — a leaked page trimmed out to the page file still consumes
+  commit but vanishes from working set, which is precisely what the old sampler measured), the leak candidates
+  **Windows itself names** via RADAR and the Resource-Exhaustion resolver, and **commit that no user-mode
+  process accounts for** — the number that decides whether a leak lives in an application or in a driver, and
+  the one Task Manager cannot show you at all.
+- Added `CaptureShellExtensions` (icon overlay handlers run synchronously on the Explorer UI thread, and
+  Windows honours only the first ~15) and `CaptureFileSystemContext` (Known Folder Move — every native
+  open-file dialog defaults to Documents, so a Documents folder redirected into OneDrive makes every dialog
+  enumerate a cloud-backed tree through the Cloud Files filter and the whole security stack — plus dead mapped
+  drives, checked under a hard timeout because a dead UNC path blocking for thirty seconds *is* the bug).
+- Added `memory-page-reads-per-second`, the hard-fault rate. This is the direct measurement of "the UI thread
+  is blocked waiting on the page file", which is what a user is describing when their clicks do nothing and
+  then all replay at once.
+
+### Fixes
+
+- **`MemoryPaging` scored zero at 96% commit.** Its gates were absolute — available memory had to fall below
+  1024 MB and commit had to reach 90% — so 1.5 GB of headroom on a 16 GB laptop scored nothing. Scoring is now
+  based on headroom in bytes, headroom as a fraction of the machine, the hard-fault rate, and whether Windows
+  has already named a leaking process.
+- **"OneDrive was not running" could be false, and it gates the entire OneDrive hypothesis.** A real capture
+  reported it while OneDrive wrote a `.odl` file two seconds later: the process-name match had failed and
+  nothing cross-checked it. Log churn now vetoes a failed process match in the hypothesis engine, the evidence
+  assessor, and the client-health signal — if OneDrive's log store is being written to, the sync engine is
+  running, whatever the process enumeration concluded.
+
+### Refusing to waste a working day
+
+- `onelag selftest` now exercises the four new probes and reports, for each degraded one, **which hypothesis
+  becomes untestable** and how to fix it. Elevation is reported as a first-class line, because it is the single
+  thing that most determines whether a capture is worth anything.
+- **`onelag watch start` now refuses to begin an all-day run with degraded collectors** unless you pass
+  `--i-understand-collectors-are-degraded`. `fltmc` and the kernel trace need an elevated terminal; an
+  eight-hour session that silently collects nothing is worse than no session at all. `onelag freeze` warns and
+  continues instead — a freeze capture is opportunistic, and partial evidence captured now beats perfect
+  evidence never captured.
+
+### Remediation
+
+- Added `onelag remediate reclaim-memory`. `StartMenuExperienceHost` was observed holding **2.7 GB** on a real
+  machine, against a normal footprint of about 100 MB; Windows relaunches it instantly and clean when killed,
+  with no data loss and no elevation. Dry-run by default, `--execute` plus `--i-understand-this-restarts-the-shell`
+  to act, and a hard-coded allowlist that cannot be extended from the command line — a diagnostic tool must not
+  become an arbitrary process killer.
+
 ### GUI and tray parity
 
 - The GUI now exposes the full feature set: a **Diagnose** tab that runs the self test, a **Collect Logs** tab for the raw log bundle, and a **Compare** tab for docked-versus-undocked session comparison, alongside the existing scan, watch, report, support, and remediation tabs.

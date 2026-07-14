@@ -20,7 +20,11 @@ public static class EvidenceQualityAssessor
         var gaps = new List<string>();
         var score = 0;
 
-        var oneDriveRunning = telemetry.OneDriveProcesses.Count > 0;
+        // Log churn vetoes a failed process-name match: if OneDrive's log store is being written to, the sync
+        // engine is running whatever the process enumeration concluded. Declaring "OneDrive was not running"
+        // marks the OneDrive hypothesis untestable, so getting it wrong silently discards the one hypothesis
+        // this tool was built to test.
+        var oneDriveRunning = telemetry.OneDriveProcesses.Count > 0 || telemetry.OneDriveLogFilesChangedLastMinute > 0;
         if (oneDriveRunning)
         {
             score += 25;

@@ -408,6 +408,23 @@ internal sealed class MainForm : Form
                     Log($"  [{marker}] {probe.Probe}: {probe.Detail}");
                 }
 
+                Log($"  Elevation: {report.Readiness.ElevationLine}");
+                foreach (var collector in report.Readiness.Collectors)
+                {
+                    var marker = collector.Status switch
+                    {
+                        ProbeStatus.Live => "OK",
+                        ProbeStatus.Degraded => "WARN",
+                        _ => "FAIL"
+                    };
+                    Log($"  [{marker}] {collector.Collector}: {collector.Reason}");
+                    if (!collector.IsHealthy)
+                    {
+                        Log($"         Cost: {collector.Cost}");
+                        Log($"         Fix:  {collector.Fix}");
+                    }
+                }
+
                 Log($"Evidence quality: {report.Quality.Grade} ({report.Quality.Score}/100)");
             }
         }
@@ -417,18 +434,41 @@ internal sealed class MainForm : Form
         }
     }
 
+    /// <summary>
+    /// The banner is the only thing a tray user reads before leaving a machine recording all day, so the
+    /// collector state has to reach it. Not being elevated is called out by name and above everything else: it
+    /// is the single fact that most determines whether the session will be worth anything, and it is the one
+    /// the user can actually fix.
+    /// </summary>
     private void UpdateReadiness(SelfTestReport report)
     {
         var live = report.Probes.Count(probe => probe.Status == ProbeStatus.Live);
         var total = report.Probes.Count;
+        var blocking = report.Readiness.Blocking;
 
         string banner;
         string detail;
-        if (report.ReadyToDiagnose)
+        if (blocking.Count > 0)
+        {
+            readinessColor = Color.FromArgb(150, 40, 40);
+            banner = report.Readiness.Elevated == false
+                ? $"NOT ELEVATED  —  {blocking.Count} collector(s) a leak hunt needs are missing"
+                : $"Collectors degraded  —  {blocking.Count} collector(s) a leak hunt needs are missing";
+            detail = string.Join(
+                Environment.NewLine,
+                new[] { report.Readiness.ElevationLine, string.Empty }
+                    .Concat(blocking.Select(collector => collector.Describe()))
+                    .Append(string.Empty)
+                    .Append("`watch start` will refuse to run until these are fixed. Close OneLag, right-click it, and choose 'Run as administrator'."));
+        }
+        else if (report.ReadyToDiagnose)
         {
             readinessColor = Color.FromArgb(30, 110, 60);
             banner = $"Ready to diagnose  —  {live}/{total} probes live, evidence {report.Quality.Grade}";
-            detail = "This machine is instrumented well enough to record a watch session.";
+            detail = report.Readiness.Degraded.Count == 0
+                ? "This machine is instrumented well enough to record a watch session."
+                : "This machine is instrumented well enough to record a watch session. Some optional collectors are degraded: "
+                    + string.Join("; ", report.Readiness.Degraded.Select(collector => $"{collector.Collector} ({collector.Reason})"));
         }
         else if (live > 0)
         {
@@ -696,6 +736,25 @@ internal sealed class MainForm : Form
 
         try
         {
+            // The same gate the CLI applies, for the same reason: the tray user is the one most likely to start
+            // an all-day recording and walk away, and a session recorded with degraded collectors produces an
+            // authoritative-looking report containing nothing. There is no acknowledgement checkbox here on
+            // purpose; the override lives on the CLI, where the user has to type out what he is accepting.
+            //
+            // Off the UI thread, like the self test above it: the check shells out to fltmc and walks the
+            // process table, and the machines this tool exists for are the ones where that is slow. A readiness
+            // check that hangs the window is the tool becoming the symptom.
+            var decision = await Task.Run(() => WatchPreflight.Evaluate(
+                CollectorReadinessCheck.Evaluate(new WindowsPlatformProbe()),
+                acknowledged: false));
+
+            if (!decision.CanProceed)
+            {
+                Log(decision.Message);
+                Log($"Not starting. Restart OneLag as administrator, or use: onelag watch start --{WatchPreflight.AcknowledgementFlag}");
+                return;
+            }
+
             var options = new WatchStartOptions(
                 ParseDuration(watchDurationBox.Text),
                 TimeSpan.FromSeconds((double)watchIntervalBox.Value),

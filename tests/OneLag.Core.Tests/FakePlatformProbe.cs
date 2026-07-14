@@ -10,7 +10,7 @@ namespace OneLag.Core.Tests;
 /// whose telemetry, pressure, host context, shell state, and driver trace are all dictated by the test. It
 /// cannot prove the real probes read Windows correctly; it proves that when they do, the conclusions follow.
 /// </summary>
-internal sealed class FakePlatformProbe : IPlatformProbe
+internal sealed class FakePlatformProbe : PortablePlatformProbe
 {
     public IReadOnlyList<RootCandidate> Roots { get; set; } = Array.Empty<RootCandidate>();
 
@@ -28,31 +28,47 @@ internal sealed class FakePlatformProbe : IPlatformProbe
 
     public DriverLatencyAttribution DriverLatency { get; set; } = DriverLatencyAttribution.Unavailable("not-requested");
 
+    public MemoryPressureDetail Memory { get; set; } = MemoryPressureDetail.Unavailable("not-requested");
+
+    public FilterDriverStack FilterStack { get; set; } = FilterDriverStack.Unavailable("not-requested");
+
+    public ShellExtensionInventory ShellExtensions { get; set; } = ShellExtensionInventory.Unavailable("not-requested");
+
+    public FileSystemContext FileSystem { get; set; } = FileSystemContext.Unavailable("not-requested");
+
     public string? ForegroundProcess { get; set; } = "explorer";
 
     public int DriverTraceCalls { get; private set; }
 
-    public IReadOnlyList<RootCandidate> DiscoverOneDriveRoots() => Roots;
+    public override IReadOnlyList<RootCandidate> DiscoverOneDriveRoots() => Roots;
 
-    public TelemetrySnapshot CaptureTelemetry() => Telemetry;
+    public override TelemetrySnapshot CaptureTelemetry() => Telemetry;
 
-    public SystemPressureSnapshot CaptureSystemPressure() => Pressure;
+    public override SystemPressureSnapshot CaptureSystemPressure() => Pressure;
 
-    public OneDriveClientHealthSnapshot CaptureOneDriveClientHealth(IReadOnlyList<RootCandidate> roots, TelemetrySnapshot telemetry) => ClientHealth;
+    public override OneDriveClientHealthSnapshot CaptureOneDriveClientHealth(IReadOnlyList<RootCandidate> roots, TelemetrySnapshot telemetry) => ClientHealth;
 
-    public IReadOnlyList<EventLogSummary> ReadRecentEventSummaries(DateTimeOffset since) => EventLogs;
+    public override IReadOnlyList<EventLogSummary> ReadRecentEventSummaries(DateTimeOffset since) => EventLogs;
 
-    public string? GetForegroundProcessName() => ForegroundProcess;
+    public override string? GetForegroundProcessName() => ForegroundProcess;
 
-    public HostContext CaptureHostContext() => HostContext;
+    public override HostContext CaptureHostContext() => HostContext;
 
-    public ShellResponsiveness CaptureShellResponsiveness() => Shell;
+    public override ShellResponsiveness CaptureShellResponsiveness() => Shell;
 
-    public DriverLatencyAttribution CaptureDriverLatency(TimeSpan duration, CancellationToken cancellationToken)
+    public override DriverLatencyAttribution CaptureDriverLatency(TimeSpan duration, CancellationToken cancellationToken)
     {
         DriverTraceCalls++;
         return DriverLatency;
     }
+
+    public override FilterDriverStack CaptureFilterDriverStack() => FilterStack;
+
+    public override MemoryPressureDetail CaptureMemoryPressure() => Memory;
+
+    public override ShellExtensionInventory CaptureShellExtensions() => ShellExtensions;
+
+    public override FileSystemContext CaptureFileSystemContext(IReadOnlyList<RootCandidate> roots) => FileSystem;
 }
 
 internal static class Snapshots
@@ -164,6 +180,50 @@ internal static class Snapshots
                 new DriverLatencySample("storport.sys", "dpc", 12, 0.3, 4_000)
             },
             "windows-kernel-etw-dpc-isr");
+
+    /// <summary>
+    /// The measurement that motivated the freeze-capture work: 21.9 GB committed with only ~6 GB of it
+    /// belonging to any user-mode process, plus StartMenuExperienceHost running far above its normal footprint.
+    /// </summary>
+    public static MemoryPressureDetail HeavyUnaccountedCommit() =>
+        new(
+            Now,
+            CommitTotalBytes: (long)(21.9 * 1024 * 1024 * 1024),
+            CommitLimitBytes: 32L * 1024 * 1024 * 1024,
+            PhysicalTotalBytes: 32L * 1024 * 1024 * 1024,
+            PhysicalAvailableBytes: 2L * 1024 * 1024 * 1024,
+            SystemUptime: TimeSpan.FromDays(9),
+            TopCommitProcesses: new[]
+            {
+                new ProcessCommitSample("StartMenuExperienceHost", 4242, (long)(2.7 * 1024 * 1024 * 1024), (long)(2.7 * 1024 * 1024 * 1024)),
+                new ProcessCommitSample("chrome", 1010, 900_000_000, 900_000_000)
+            },
+            LeakCandidates: Array.Empty<MemoryLeakCandidate>(),
+            EvidenceState: "windows-toolhelp-process-and-performance-counters",
+            SumOfProcessPrivateBytes: 6L * 1024 * 1024 * 1024,
+            ProcessesSampled: 240,
+            ProcessesInaccessible: 0);
+
+    /// <summary>A third-party filter stack large enough to trip the SecurityOrSearchScanner hypothesis.</summary>
+    public static FilterDriverStack CrowdedFilterStack() =>
+        new(
+            Now,
+            new[]
+            {
+                new FilterDriverInfo("WdFilter", 328010, 1, "Microsoft", true, true),
+                new FilterDriverInfo("CrowdStrike", 328100, 1, "CrowdStrike", true, false),
+                new FilterDriverInfo("mfeasfk", 329800, 1, "McAfee", true, false),
+                new FilterDriverInfo("SysmonDrv", 385201, 1, "Sysinternals", true, false),
+                new FilterDriverInfo("luafv", 135000, 1, "Microsoft", true, true),
+                new FilterDriverInfo("cldflt", 180451, 1, "Microsoft", true, true),
+                new FilterDriverInfo("bindflt", 409920, 1, "Microsoft", true, true)
+            },
+            FileSystemFilterCount: 7,
+            ThirdPartyFileSystemFilterCount: 6,
+            SecurityVendors: new[] { "CrowdStrike", "McAfee" },
+            DefenderFilterRunning: true,
+            CloudFilesFilterRunning: true,
+            EvidenceState: "windows-fltmc-filters");
 
     private static SystemPressureSnapshot Pressure(params (string Kind, double Value)[] signals)
     {

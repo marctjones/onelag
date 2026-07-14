@@ -38,17 +38,48 @@ Scan a specific folder and emit JSON:
 onelag scan --root "$env:USERPROFILE\OneDrive" --format json --output onelag-report.json
 ```
 
-Start a bounded foreground watch session:
+## Catch The Freeze, Don't Describe The Calm
+
+Run this **from an elevated terminal, and leave it running for the day**. It detects freezes by itself:
 
 ```powershell
 onelag watch start --duration 8h
 ```
 
-Mark that lag is happening, then generate a watch report:
+You do not need to tag anything. Asking you to mark a freeze is asking you to act at the one moment your
+machine will not let you — so the watcher measures its own starvation instead. It asks to sleep for a second,
+and when it wakes up four seconds later, it knows the machine stalled, writes a marker naming the signal that
+tripped, and takes a deep capture on the spot. It also samples memory every thirty seconds, which turns an
+all-day run into a leak hunt: the report ranks processes by **growth rate rather than size**, because the
+leaker is whatever is climbing, not whatever is biggest.
+
+If commit keeps climbing while every process stays flat, the leak is in the kernel, held by a driver, and no
+process list will ever show it. The report says so.
+
+`watch start` **refuses to run with degraded collectors**, because an eight-hour session that silently
+collects nothing is worse than no session at all. If it stops you, re-run it as administrator.
+
+Generate the report when the session ends:
 
 ```powershell
-onelag watch mark
 onelag watch report --report onelag-watch-report.md
+```
+
+If the machine is locking up *right now* and you want a capture this instant:
+
+```powershell
+onelag freeze --note "clicks queued up closing chrome windows"
+```
+
+That takes no inventory and walks no directory, so it returns while the symptom is still happening, and it
+prints its headline to the console — you should not have to open a file mid-freeze.
+
+Reclaim memory from a bloated shell process without rebooting (dry run first; nothing is killed until you
+say so):
+
+```powershell
+onelag remediate reclaim-memory
+onelag remediate reclaim-memory --execute --i-understand-this-restarts-the-shell
 ```
 
 Name the driver holding the CPU at high IRQL. This needs an elevated terminal, and you should reproduce the

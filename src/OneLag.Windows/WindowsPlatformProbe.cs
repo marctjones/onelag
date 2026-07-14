@@ -85,6 +85,16 @@ public sealed class WindowsPlatformProbe : PortablePlatformProbe
         return WindowsShellProbe.Capture();
     }
 
+    public override MemoryPressureDetail CaptureMemoryPressure()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return base.CaptureMemoryPressure();
+        }
+
+        return WindowsMemoryPressureProbe.Capture();
+    }
+
     public override DriverLatencyAttribution CaptureDriverLatency(TimeSpan duration, CancellationToken cancellationToken)
     {
         if (!OperatingSystem.IsWindows())
@@ -93,6 +103,36 @@ public sealed class WindowsPlatformProbe : PortablePlatformProbe
         }
 
         return WindowsDriverTraceProbe.Capture(duration, cancellationToken);
+    }
+
+    public override FilterDriverStack CaptureFilterDriverStack()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return base.CaptureFilterDriverStack();
+        }
+
+        return WindowsFilterDriverProbe.Capture();
+    }
+
+    public override ShellExtensionInventory CaptureShellExtensions()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return base.CaptureShellExtensions();
+        }
+
+        return WindowsShellExtensionProbe.Capture();
+    }
+
+    public override FileSystemContext CaptureFileSystemContext(IReadOnlyList<RootCandidate> roots)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return base.CaptureFileSystemContext(roots);
+        }
+
+        return WindowsFileSystemContextProbe.Capture(roots);
     }
 
     public override OneDriveClientHealthSnapshot CaptureOneDriveClientHealth(IReadOnlyList<RootCandidate> roots, TelemetrySnapshot telemetry)
@@ -129,13 +169,29 @@ public sealed class WindowsPlatformProbe : PortablePlatformProbe
                 "Review the dry-run plan before executing a reset."));
         }
 
+        // "OneDrive is not running" gates the entire OneDrive hypothesis, so claiming it wrongly makes the
+        // report untestable in the one direction it exists to test. A real capture reported exactly that while
+        // OneDrive was writing a .odl file two seconds later: the process-name match had failed, and nothing
+        // cross-checked it. Log churn is direct evidence that *something* is driving the sync engine, so it
+        // vetoes the process check rather than being reported alongside a contradiction.
         if (roots.Count > 0 && telemetry.OneDriveProcesses.Count == 0)
         {
-            signals.Add(new ClientHealthSignal(
-                Severity.Info,
-                "onedrive-process-not-running",
-                "Local OneDrive sync roots were detected, but no OneDrive process was running at scan time.",
-                "This can be normal when OneDrive is paused, signed out, not started, or managed by work policy."));
+            if (telemetry.OneDriveLogFilesChangedLastMinute > 0)
+            {
+                signals.Add(new ClientHealthSignal(
+                    Severity.Warning,
+                    "onedrive-process-match-failed",
+                    $"No OneDrive process matched by name, but {telemetry.OneDriveLogFilesChangedLastMinute:N0} OneDrive log file(s) were written in the last minute, so the sync engine is running. The process match, not OneDrive, is what failed here.",
+                    "Treat OneDrive as running. Live OneDrive CPU and memory evidence is missing from this capture, so read any OneDrive verdict as untested rather than disproven."));
+            }
+            else
+            {
+                signals.Add(new ClientHealthSignal(
+                    Severity.Info,
+                    "onedrive-process-not-running",
+                    "Local OneDrive sync roots were detected, no OneDrive process was running at scan time, and no OneDrive log files were written in the last minute.",
+                    "This can be normal when OneDrive is paused, signed out, not started, or managed by work policy."));
+            }
         }
 
         if (telemetry.OneDriveLogFilesChangedLastMinute >= 10)

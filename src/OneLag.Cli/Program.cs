@@ -44,6 +44,7 @@ internal static class Program
             return args[0].ToLowerInvariant() switch
             {
                 "scan" => RunScan(args[1..], cancellation.Token),
+                "freeze" => RunFreeze(args[1..], cancellation.Token),
                 "watch" => await RunWatch(args[1..], cancellation.Token),
                 "trace" => RunTrace(args[1..], cancellation.Token),
                 "compare" => RunCompare(args[1..]),
@@ -154,6 +155,124 @@ internal static class Program
         return report.Findings.Any(finding => finding.Severity is Severity.HighRisk or Severity.Emergency) ? 1 : 0;
     }
 
+    /// <summary>
+    /// Captures the machine while it is actually lagging -- the command to run the instant a freeze is felt,
+    /// not once it has passed. Every capture this project ever took was recorded at a calm moment, which is
+    /// why nothing was ever diagnosed; this one deliberately skips the directory walk `scan` does so it starts
+    /// fast and returns while the symptom is still happening. See FreezeCaptureService for the full reasoning.
+    /// </summary>
+    private static int RunFreeze(string[] args, CancellationToken cancellationToken)
+    {
+        var duration = TimeSpan.FromSeconds(10);
+        var output = $"onelag-freeze-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}.md";
+        var format = "markdown";
+        string? note = null;
+        var skipTrace = false;
+
+        for (var i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--duration":
+                    duration = ParseDuration(RequireValue(args, ref i, "--duration"));
+                    break;
+                case "--note":
+                    note = RequireValue(args, ref i, "--note");
+                    break;
+                case "--no-trace":
+                    skipTrace = true;
+                    break;
+                case "--output":
+                case "-o":
+                    output = RequireValue(args, ref i, args[i]);
+                    break;
+                case "--format":
+                    format = RequireValue(args, ref i, "--format").ToLowerInvariant();
+                    break;
+                default:
+                    throw new ArgumentException($"Unknown freeze argument '{args[i]}'.");
+            }
+        }
+
+        if (duration <= TimeSpan.Zero || duration > TimeSpan.FromMinutes(2))
+        {
+            throw new ArgumentException("--duration must be greater than zero and no more than 2m.");
+        }
+
+        if (format is not ("markdown" or "md" or "json"))
+        {
+            throw new ArgumentException("--format must be 'markdown' or 'json'.");
+        }
+
+        var platform = new WindowsPlatformProbe();
+        var service = new FreezeCaptureService(platform);
+
+        Console.WriteLine("Capturing now -- hold on.");
+        Console.WriteLine("Keep reproducing the lag while this runs: move the mouse, open the stuck dialog, use the machine as you normally would.");
+        if (!skipTrace)
+        {
+            Console.WriteLine($"This includes a {duration} kernel trace; everything else is captured first and is fast.");
+        }
+
+        var capture = service.Capture(new FreezeCaptureOptions(duration, note, skipTrace), cancellationToken);
+
+        // Freeze WARNS and CONTINUES where `watch start` REFUSES. That asymmetry is deliberate: the user is
+        // mid-episode and the freeze will be over in seconds, so partial evidence captured now beats perfect
+        // evidence captured never. A watch session, by contrast, is about to consume a day and can simply be
+        // restarted two minutes later from an elevated terminal. The readiness is judged from the readings the
+        // capture already took rather than by re-probing, because re-probing would cost the user real seconds
+        // while the machine is frozen.
+        var readiness = CollectorReadinessCheck.Evaluate(
+            capture.FilterStack,
+            capture.Memory,
+            shellExtensions: null,
+            capture.FileSystem,
+            CollectorReadinessCheck.IsElevated());
+
+        foreach (var collector in readiness.Degraded)
+        {
+            Console.Error.WriteLine($"Warning: {collector.Describe()}");
+        }
+
+        if (readiness.Degraded.Count > 0)
+        {
+            Console.Error.WriteLine("Everything else below was still captured. A partial capture taken during the freeze is worth more than a perfect one taken after it.");
+        }
+
+        var roots = platform.DiscoverOneDriveRoots();
+        var redactor = new Redactor(fullPaths: false, roots.Select(root => root.Path));
+
+        var text = format is "json"
+            ? FreezeReportWriter.ToJson(capture)
+            : FreezeReportWriter.ToMarkdown(capture, redactor);
+
+        var outputPath = Path.GetFullPath(output);
+        Directory.CreateDirectory(Path.GetDirectoryName(outputPath) ?? Environment.CurrentDirectory);
+        File.WriteAllText(outputPath, text);
+
+        // A TL;DR to the console: the user is mid-freeze and will not go read a file. This is the handful of
+        // numbers that matter most, not a recap of the whole report.
+        Console.WriteLine();
+        var topCause = capture.Hypotheses.FirstOrDefault();
+        if (topCause is not null && topCause.Verdict is not (HypothesisVerdict.NotSupported or HypothesisVerdict.Unknown))
+        {
+            Console.WriteLine($"Top cause: {topCause.Kind} ({topCause.Verdict}, score {topCause.Score})");
+        }
+
+        if (capture.Memory.CommitTotalBytes is { } commitTotal)
+        {
+            Console.WriteLine($"Commit: {commitTotal / (1024.0 * 1024 * 1024):N1} GB");
+        }
+
+        if (capture.Memory.UnaccountedCommitBytes is { } unaccounted && unaccounted > 0)
+        {
+            Console.WriteLine($"Unaccounted commit: {unaccounted / (1024.0 * 1024 * 1024):N1} GB (no user-mode process holds this)");
+        }
+
+        Console.WriteLine($"Report: {outputPath}");
+        return 0;
+    }
+
     private static async Task<int> RunWatch(string[] args, CancellationToken cancellationToken)
     {
         if (args.Length == 0 || args[0] is "-h" or "--help" or "help")
@@ -197,6 +316,38 @@ internal static class Program
             Console.WriteLine($"       {probe.EvidenceState}");
         }
 
+        // Elevation gets its own line, above the collectors, because it is the single thing that most decides
+        // whether a capture is worth anything: two of the four collectors below cannot read the kernel at all
+        // without it, and a third silently mis-attributes memory.
+        Console.WriteLine();
+        Console.WriteLine("Elevation");
+        var elevationMarker = report.Readiness.Elevated switch
+        {
+            true => "OK  ",
+            false => "FAIL",
+            _ => "WARN"
+        };
+        Console.WriteLine($"[{elevationMarker}] {"administrator",-22} {report.Readiness.ElevationLine}");
+
+        Console.WriteLine();
+        Console.WriteLine("Collectors");
+        foreach (var collector in report.Readiness.Collectors)
+        {
+            var marker = collector.Status switch
+            {
+                ProbeStatus.Live => "OK  ",
+                ProbeStatus.Degraded => "WARN",
+                _ => "FAIL"
+            };
+
+            Console.WriteLine($"[{marker}] {collector.Collector,-22} {collector.Reason}");
+            if (!collector.IsHealthy)
+            {
+                Console.WriteLine($"       Cost: {collector.Cost}");
+                Console.WriteLine($"       Fix:  {collector.Fix}");
+            }
+        }
+
         Console.WriteLine();
         Console.WriteLine($"Evidence quality: {report.Quality.Grade} ({report.Quality.Score}/100)");
 
@@ -212,6 +363,11 @@ internal static class Program
             Console.WriteLine("This machine is instrumented well enough to record a watch session.");
             Console.WriteLine("Next: onelag watch start --duration 8h --output docked-day");
             return 0;
+        }
+
+        if (!report.Readiness.CanRecordLeakHunt)
+        {
+            Console.WriteLine("A watch session started now would REFUSE to run, because the collectors marked above cannot answer the questions the session exists to ask.");
         }
 
         Console.WriteLine("Too many probes are degraded for a watch session to be worth recording.");
@@ -624,6 +780,7 @@ internal static class Program
             "move" => RunMove(args[1..], cancellationToken),
             "rollback" => RunRollback(args[1..], cancellationToken),
             "verify" => RunMoveVerify(args[1..], cancellationToken),
+            "reclaim-memory" => RunReclaimMemory(args[1..]),
             _ => UnknownCommand($"remediate {args[0]}")
         };
     }
@@ -794,6 +951,95 @@ internal static class Program
         Console.WriteLine(result.Message);
     }
 
+    /// <summary>
+    /// Kills known-safe, self-restarting shell processes to reclaim memory they should not be holding. On the
+    /// machine that motivated this project, StartMenuExperienceHost.exe was holding 2.7 GB against an expected
+    /// footprint of roughly 100 MB; killing it costs nothing because Windows relaunches it instantly with no
+    /// data loss and no elevation required. Defaults to a dry run, exactly like the move and reset-onedrive
+    /// commands: nothing is killed unless both --execute and the acknowledgement flag are given.
+    /// </summary>
+    private static int RunReclaimMemory(string[] args)
+    {
+        var execute = false;
+        var acknowledged = false;
+
+        for (var i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--execute":
+                    execute = true;
+                    break;
+                case "--i-understand-this-restarts-the-shell":
+                    acknowledged = true;
+                    break;
+                default:
+                    throw new ArgumentException($"Unknown remediate reclaim-memory argument '{args[i]}'.");
+            }
+        }
+
+        var platform = new WindowsPlatformProbe();
+        var memory = platform.CaptureMemoryPressure();
+        var service = new MemoryReclaimService();
+        var plan = service.Plan(memory);
+
+        Console.WriteLine("Memory reclaim plan");
+        Console.WriteLine($"Evidence: {memory.EvidenceState}");
+        Console.WriteLine();
+
+        if (plan.Count == 0)
+        {
+            Console.WriteLine("No candidate is bloated enough to be worth restarting (threshold: 500 MB).");
+            return 0;
+        }
+
+        foreach (var candidate in plan)
+        {
+            Console.WriteLine($"- {candidate.ProcessName} (pid {candidate.ProcessId}) is holding {candidate.PrivateBytes / (1024.0 * 1024):N0} MB");
+            Console.WriteLine($"    {candidate.Description}");
+            Console.WriteLine($"    {candidate.Rationale}");
+        }
+
+        var plannedBytes = plan.Sum(candidate => candidate.PrivateBytes);
+        Console.WriteLine();
+        Console.WriteLine($"Would reclaim: {plannedBytes / (1024.0 * 1024 * 1024):N2} GB");
+
+        if (!execute)
+        {
+            Console.WriteLine();
+            Console.WriteLine("Dry run only. Nothing was killed. To execute:");
+            Console.WriteLine("onelag remediate reclaim-memory --execute --i-understand-this-restarts-the-shell");
+            return 0;
+        }
+
+        if (!acknowledged)
+        {
+            throw new ArgumentException("--execute requires --i-understand-this-restarts-the-shell.");
+        }
+
+        if (!OperatingSystem.IsWindows())
+        {
+            throw new PlatformNotSupportedException("Reclaiming memory is only supported on Windows.");
+        }
+
+        var results = service.Execute(plan);
+        Console.WriteLine();
+
+        var reclaimedBytes = 0L;
+        foreach (var result in results)
+        {
+            Console.WriteLine($"- {result.ProcessName}: {(result.Killed ? "killed" : "not killed")} - {result.Message}");
+            if (result.Killed)
+            {
+                reclaimedBytes += result.ReclaimedBytes;
+            }
+        }
+
+        Console.WriteLine();
+        Console.WriteLine($"Reclaimed: {reclaimedBytes / (1024.0 * 1024 * 1024):N2} GB");
+        return 0;
+    }
+
     private static int RunView(string[] args)
     {
         string? reportPath = null;
@@ -923,6 +1169,10 @@ internal static class Program
         var interval = TimeSpan.FromSeconds(2);
         var output = GetDefaultWatchDirectory();
         var maxSamples = 14_400;
+        var memoryInterval = TimeSpan.FromSeconds(30);
+        var autoCapture = true;
+        var autoCaptureTrace = false;
+        var acknowledgedDegradedCollectors = false;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -931,8 +1181,20 @@ internal static class Program
                 case "--duration":
                     duration = ParseDuration(RequireValue(args, ref i, "--duration"));
                     break;
+                case "--i-understand-collectors-are-degraded":
+                    acknowledgedDegradedCollectors = true;
+                    break;
                 case "--interval":
                     interval = ParseDuration(RequireValue(args, ref i, "--interval"));
+                    break;
+                case "--memory-interval":
+                    memoryInterval = ParseDuration(RequireValue(args, ref i, "--memory-interval"));
+                    break;
+                case "--no-auto-capture":
+                    autoCapture = false;
+                    break;
+                case "--auto-capture-trace":
+                    autoCaptureTrace = true;
                     break;
                 case "--output":
                     output = RequireValue(args, ref i, "--output");
@@ -960,13 +1222,49 @@ internal static class Program
             throw new ArgumentException("--max-samples must be greater than zero.");
         }
 
+        if (memoryInterval <= TimeSpan.Zero)
+        {
+            throw new ArgumentException("--memory-interval must be greater than zero.");
+        }
+
         var platform = new WindowsPlatformProbe();
         var watch = new WatchService();
         var directory = Path.GetFullPath(output);
+        var options = new WatchStartOptions(duration, interval, directory, maxSamples)
+        {
+            MemoryInterval = memoryInterval,
+            AutoCapture = autoCapture,
+            AutoCaptureDriverTrace = autoCaptureTrace
+        };
+
+        // Pre-flight, BEFORE anything is recorded. If the collectors a leak hunt depends on are degraded, this
+        // refuses to start rather than spending the user's day recording an authoritative-looking nothing. It
+        // is a flag, never a prompt, so a non-interactive shell or a CI job cannot hang here: the flag is
+        // honoured or the command exits.
+        var decision = WatchPreflight.Evaluate(CollectorReadinessCheck.Evaluate(platform), acknowledgedDegradedCollectors);
+        var writer = decision.CanProceed ? Console.Out : Console.Error;
+        writer.WriteLine(decision.Message);
+        writer.WriteLine();
+
+        if (!decision.CanProceed)
+        {
+            return 1;
+        }
 
         Console.WriteLine($"Watch started for {duration}. Output: {directory}");
+        if (autoCapture)
+        {
+            // Said plainly, because the whole reason this exists is that the user cannot act during a freeze.
+            Console.WriteLine("Freezes will be detected and captured automatically. You do not need to mark them.");
+            Console.WriteLine($"Memory is sampled every {memoryInterval.TotalSeconds:N0}s, so an all-day run will show a leak growing and name what is growing.");
+        }
+        else
+        {
+            Console.WriteLine("Automatic freeze capture is OFF. Freezes will only be recorded if you run `onelag watch mark` during one.");
+        }
+
         Console.WriteLine("Press Ctrl+C to stop, or run `onelag watch stop --output <dir>` from another terminal.");
-        var summary = await watch.StartAsync(new WatchStartOptions(duration, interval, directory, maxSamples), platform, cancellationToken);
+        var summary = await watch.StartAsync(options, platform, cancellationToken);
         Console.WriteLine($"Watch stopped. Samples: {summary.Samples:N0}");
         return 0;
     }
@@ -1243,7 +1541,12 @@ internal static class Program
         Commands:
           selftest                                          (which probes actually measure anything; run this first)
           scan [--root PATH] [--output PATH] [--format markdown|json] [--full-paths] [--trace-drivers 30s]
-          watch start [--duration 8h] [--interval 2s] [--output DIR]
+          freeze [--duration 10s] [--note TEXT] [--no-trace] [--output PATH] [--format markdown|json]
+                                                     (run this WHILE the machine is lagging, not after)
+          watch start [--duration 8h] [--interval 2s] [--output DIR] [--memory-interval 30s]
+                      [--no-auto-capture] [--auto-capture-trace] [--i-understand-collectors-are-degraded]
+                                                     (detects and captures freezes on its own; leave it running all day)
+                                                     (refuses to start with degraded collectors: run it elevated)
           watch stop [--output DIR]
           watch status [--output DIR]
           watch mark [--output DIR] [--note TEXT]
@@ -1255,6 +1558,7 @@ internal static class Program
           support trace-plan [--output DIR]
           support bundle --report PATH [--report PATH] [--watch-output DIR] [--output DIR] [--zip]
           remediate move-plan --source PATH --destination PATH [--output DIR]
+          remediate reclaim-memory [--execute --i-understand-this-restarts-the-shell]
           view --report PATH [--timeline]
           interactive
           version
@@ -1282,11 +1586,39 @@ internal static class Program
         OneLag watch
 
         Commands:
-          start   Start a bounded foreground responsiveness recorder.
+          start   Start a bounded recorder. It detects freezes itself and captures them unattended.
           stop    Request a running recorder to stop.
           status  Print recorder state.
-          mark    Record "lag happened now" without capturing input content.
-          report  Generate a Markdown timeline report.
+          mark    Record "lag happened now" without capturing input content. Optional; the watcher marks freezes on its own.
+          report  Generate a Markdown timeline report, including the memory-growth trend.
+
+        start options:
+          --duration 8h            How long to record (max 24h).
+          --interval 2s            Responsiveness sampling cadence.
+          --memory-interval 30s    Memory/commit sampling cadence. This is the leak time-series.
+          --no-auto-capture        Turn off automatic freeze detection and capture.
+          --auto-capture-trace     Also run a kernel DPC/ISR trace on each auto-detected freeze.
+                                   Off by default: a 10s ETW trace inside a sampling loop is heavy, and
+                                   this tool is measuring a machine that is already starved.
+          --i-understand-collectors-are-degraded
+                                   Record anyway when the collectors a leak hunt depends on are broken.
+
+        Collectors are checked before anything is recorded:
+          Without an elevated terminal the filter-driver stack cannot be read at all, the kernel driver trace
+          returns nothing, and the process accounting that decides whether memory is held by a driver or by a
+          program is incomplete -- which can make OneLag accuse a driver of a leak that was really a process it
+          could not open. `watch start` therefore REFUSES to begin a run whose collectors are degraded, because
+          an 8-hour run that silently collects nothing is worse than no run at all. Re-run from an elevated
+          terminal, or override with --i-understand-collectors-are-degraded.
+
+        Unattended by design:
+          Freezes are detected from the watcher's own starvation (a 1s sleep that returns 4s late means the
+          machine stalled), from a hung Explorer shell, and from collapsing commit headroom. You do not have
+          to mark a freeze while frozen -- which is the one moment the machine will not let you.
+
+          Deep captures are debounced (one per 2 minutes) and capped per run so an all-day recording on a
+          badly broken machine cannot fill the disk. Any detection that was denied a capture is still marked
+          and is reported as dropped, so the report never understates how often the machine froze.
         """);
     }
 
@@ -1327,14 +1659,17 @@ internal static class Program
         OneLag remediate
 
         Commands:
-          move-plan   Generate a dry-run move plan, execution script, rollback script, and verification script.
-          move        Move a reviewed folder only with explicit confirmation flags.
-          rollback    Move a reviewed folder back only with explicit confirmation flags.
-          verify      Verify source/destination existence and destination inventory.
+          move-plan       Generate a dry-run move plan, execution script, rollback script, and verification script.
+          move            Move a reviewed folder only with explicit confirmation flags.
+          rollback        Move a reviewed folder back only with explicit confirmation flags.
+          verify          Verify source/destination existence and destination inventory.
+          reclaim-memory  Kill bloated, self-restarting shell processes (StartMenuExperienceHost, explorer) to reclaim memory.
 
         Safety:
           Generated scripts do not move files unless run with -Execute -IUnderstandMovesFiles.
           Direct move and rollback commands default to dry-run and require --execute --i-understand-moves-files.
+          reclaim-memory defaults to dry-run and requires --execute --i-understand-this-restarts-the-shell.
+          Only StartMenuExperienceHost and explorer.exe can ever be killed; the allowlist is not configurable.
         """);
     }
 }
