@@ -19,24 +19,38 @@ Open a new terminal and verify the install:
 
 ```powershell
 onelag version
-onelag scan --output onelag-report.md
+onelag scan
 ```
 
 This preview is a self-contained Windows x64 CLI plus native Windows tray/GUI plus PowerShell installer bundle. It is not yet a signed MSI/EXE installer.
 
 ## Commands
 
-Run a one-shot scan using discovered OneDrive roots:
+Run a one-shot scan using discovered OneDrive roots. With no `--output`, it writes a timestamped report
+(`onelag-report-20260714-175230.md`) so a second run never destroys the first — diagnosing lag almost always
+means comparing two captures, and both have to survive:
 
 ```powershell
-onelag scan --output onelag-report.md
+onelag scan
 ```
 
 Scan a specific folder and emit JSON:
 
 ```powershell
-onelag scan --root "$env:USERPROFILE\OneDrive" --format json --output onelag-report.json
+onelag scan --root "$env:USERPROFILE\OneDrive" --format json
 ```
+
+Pass an explicit `--output PATH` when you want a fixed name — a script piping the report elsewhere, for
+example, or a name you plan to refer back to from a later command, as the rest of the walkthrough below does:
+
+```powershell
+onelag scan --output onelag-report.md
+```
+
+If that path already exists, OneLag refuses to overwrite it and exits non-zero rather than silently destroying
+whatever it contains; pass `--overwrite` when that is what you actually want. The rest of the examples below
+name their outputs explicitly, because later steps (comparing sessions, bundling reports) refer back to those
+names — running one of them twice with the same name needs `--overwrite`.
 
 ## Catch The Freeze, Don't Describe The Calm
 

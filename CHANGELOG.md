@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Stop silently overwriting previous captures
+
+Diagnosing lag is a comparison exercise: a docked day against an undocked day, a capture before a fix against
+one after it, commit growth on Monday against commit growth on Friday. Every one of those needs both captures
+to still exist. The default output names used to be fixed — `onelag-report.md`, `onelag-watch-report.md`,
+`onelag-comparison.md`, `onelag-driver-trace.md`, `onelag-trace-plan`, `onelag-support-bundle`,
+`onelag-move-plan` — so a second run silently destroyed the evidence the first run existed to produce, and the
+user found out only when they went looking for it.
+
+- Added `OutputPaths.Timestamped`, and every command that writes a report, trace, or plan now defaults to a
+  timestamped name (`onelag-report-20260714-175230.md`) instead of a fixed one, so repeated runs accumulate
+  rather than collide. `scan`'s default extension still follows `--format` (`.json` stays `.json`), and
+  `freeze`'s pre-existing timestamped default now goes through the same implementation instead of its own.
+- Added `OutputPaths.EnsureWritable` and wired it into every command above plus `trace dpc` and `compare`: an
+  explicit `--output`/`--report` that already exists is now refused with an actionable message and a non-zero
+  exit rather than silently overwritten. Pass the new `--overwrite` flag (same name and semantics as the
+  existing `collect`/`support bundle` flag) when overwriting is actually what you want.
+- Left `watch start --output DIR` and `compare --session DIR` alone on purpose: those name a session directory
+  that `watch mark`, `watch stop`, and `watch report` refer to by name across a whole run, and timestamping or
+  overwrite-guarding them would break that workflow outright.
+
 ### Catching the freeze instead of describing the calm
 
 Every capture this project had ever taken was recorded while the machine was fine. That is why nothing was
