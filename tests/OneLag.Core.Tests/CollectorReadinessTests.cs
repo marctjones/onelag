@@ -64,12 +64,10 @@ public sealed class CollectorReadinessTests
         Assert.Contains("UnaccountedCommitBytes is unreliable", memory.Cost, StringComparison.Ordinal);
         Assert.Contains("falsely indicated, or missed", memory.Cost, StringComparison.Ordinal);
 
-        var trace = Assert.Single(
-            report.Readiness.Collectors,
-            collector => collector.Collector == CollectorReadinessCheck.DriverTraceCollector);
-        Assert.NotEqual(ProbeStatus.Live, trace.Status);
-        Assert.Contains("DriverInterruptLatency cannot NAME a driver", trace.Cost, StringComparison.Ordinal);
-
+        // The driver trace is judged from elevation rather than from a probe call, so a fake probe cannot
+        // script it and this test cannot assert on it: CI runs Windows agents elevated, where it correctly
+        // reports Live. It is covered deterministically by DriverTraceIsDegradedWhenNotElevated below, which
+        // passes elevation in explicitly instead of reading it off the process.
         var shellExtensions = Assert.Single(
             report.Readiness.Collectors,
             collector => collector.Collector == CollectorReadinessCheck.ShellExtensionsCollector);
@@ -83,6 +81,48 @@ public sealed class CollectorReadinessTests
 
         Assert.False(report.Readiness.CanRecordLeakHunt);
         Assert.False(report.ReadyToDiagnose);
+    }
+
+    /// <summary>
+    /// Elevation is passed in rather than read off the current process, so this holds on every platform and on
+    /// CI, where the Windows agents happen to run elevated. A test that reads ambient elevation asserts what
+    /// the runner is, not what the code does.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(null)]
+    public void DriverTraceIsDegradedWhenNotElevated(bool? elevated)
+    {
+        var report = CollectorReadinessCheck.Evaluate(
+            FilterDriverStack.Unavailable("fltmc-requires-elevation"),
+            MemoryPressureDetail.Unavailable("unavailable"),
+            ShellExtensionInventory.Unavailable("unavailable"),
+            FileSystemContext.Unavailable("unavailable"),
+            elevated);
+
+        var trace = Assert.Single(
+            report.Collectors,
+            collector => collector.Collector == CollectorReadinessCheck.DriverTraceCollector);
+
+        Assert.NotEqual(ProbeStatus.Live, trace.Status);
+        Assert.Contains("DriverInterruptLatency cannot NAME a driver", trace.Cost, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DriverTraceIsLiveWhenElevated()
+    {
+        var report = CollectorReadinessCheck.Evaluate(
+            FilterDriverStack.Unavailable("fltmc-requires-elevation"),
+            MemoryPressureDetail.Unavailable("unavailable"),
+            ShellExtensionInventory.Unavailable("unavailable"),
+            FileSystemContext.Unavailable("unavailable"),
+            elevated: true);
+
+        var trace = Assert.Single(
+            report.Collectors,
+            collector => collector.Collector == CollectorReadinessCheck.DriverTraceCollector);
+
+        Assert.Equal(ProbeStatus.Live, trace.Status);
     }
 
     [Fact]
