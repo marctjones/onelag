@@ -45,6 +45,79 @@ public sealed class CliSmokeTests : IDisposable
         Assert.Contains("Kind: Diagnostic", view.StandardOutput);
     }
 
+    /// <summary>
+    /// The default output name is timestamped precisely so a second run does not destroy the first: docked vs
+    /// undocked, before-fix vs after-fix, Monday vs Friday all need both captures to still exist. The
+    /// timestamp format (`yyyyMMdd-HHmmss`) is second-resolution, and `dotnet run` startup overhead is not
+    /// reliably more than a second on a fast machine, so this test awaits a full second between the two runs
+    /// rather than relying on process overhead -- a flaky timestamp collision would fail this test either way
+    /// (one file instead of two, or the second run refusing to clobber the first).
+    /// </summary>
+    [Fact]
+    public async Task ScanCommandWithNoOutputProducesTwoDistinctTimestampedFilesOnRepeatedRuns()
+    {
+        var scanRoot = Path.Combine(tempRoot, "OneDrive");
+        Directory.CreateDirectory(scanRoot);
+        File.WriteAllText(Path.Combine(scanRoot, "document.txt"), "content");
+
+        var first = await RunCliIn(tempRoot, "scan", "--root", scanRoot, "--max-items", "1000");
+        Assert.Equal(0, first.ExitCode);
+
+        await Task.Delay(TimeSpan.FromSeconds(1.1));
+
+        var second = await RunCliIn(tempRoot, "scan", "--root", scanRoot, "--max-items", "1000");
+        Assert.Equal(0, second.ExitCode);
+
+        var reports = Directory.GetFiles(tempRoot, "onelag-report-*.md");
+        Assert.Equal(2, reports.Length);
+    }
+
+    /// <summary>
+    /// A default `--format json` run must still produce a `.json` file, not `.md` -- --format is parsed in the
+    /// same loop as --output, so the default has to be computed after parsing finishes, not before.
+    /// </summary>
+    [Fact]
+    public async Task ScanCommandWithJsonFormatAndNoOutputDefaultsToJsonExtension()
+    {
+        var scanRoot = Path.Combine(tempRoot, "OneDrive");
+        Directory.CreateDirectory(scanRoot);
+        File.WriteAllText(Path.Combine(scanRoot, "document.txt"), "content");
+
+        var result = await RunCliIn(tempRoot, "scan", "--root", scanRoot, "--max-items", "1000", "--format", "json");
+
+        Assert.Equal(0, result.ExitCode);
+        var jsonReports = Directory.GetFiles(tempRoot, "onelag-report-*.json");
+        var mdReports = Directory.GetFiles(tempRoot, "onelag-report-*.md");
+        Assert.Single(jsonReports);
+        Assert.Empty(mdReports);
+    }
+
+    /// <summary>
+    /// An explicit --output that already exists must be refused rather than silently clobbered, with an
+    /// actionable message on stderr and a non-zero exit -- and --overwrite must be the escape hatch.
+    /// </summary>
+    [Fact]
+    public async Task ScanCommandRefusesToClobberExplicitOutputUnlessOverwriteIsPassed()
+    {
+        var scanRoot = Path.Combine(tempRoot, "OneDrive");
+        Directory.CreateDirectory(scanRoot);
+        File.WriteAllText(Path.Combine(scanRoot, "document.txt"), "content");
+        var reportPath = Path.Combine(tempRoot, "existing-report.md");
+        await File.WriteAllTextAsync(reportPath, "a previous capture that must survive");
+
+        var refused = await RunCli("scan", "--root", scanRoot, "--output", reportPath, "--max-items", "1000");
+
+        Assert.NotEqual(0, refused.ExitCode);
+        Assert.Contains("--overwrite", refused.StandardError, StringComparison.Ordinal);
+        Assert.DoesNotContain("Unhandled exception", refused.StandardError, StringComparison.Ordinal);
+        Assert.Equal("a previous capture that must survive", await File.ReadAllTextAsync(reportPath));
+
+        var overwritten = await RunCli("scan", "--root", scanRoot, "--output", reportPath, "--max-items", "1000", "--overwrite");
+
+        Assert.Equal(0, overwritten.ExitCode);
+        Assert.DoesNotContain("a previous capture that must survive", await File.ReadAllTextAsync(reportPath));
+    }
+
     [Fact]
     public async Task ScanCommandReturnsWarningStatusForHighRiskDevelopmentTree()
     {
@@ -325,7 +398,14 @@ public sealed class CliSmokeTests : IDisposable
         }
     }
 
-    private static async Task<CliResult> RunCli(params string[] arguments)
+    private static Task<CliResult> RunCli(params string[] arguments) => RunCliIn(FindRepoRoot(), arguments);
+
+    /// <summary>
+    /// Runs the CLI with a chosen working directory, so tests that exercise a default (no --output) path can
+    /// point it at a disposable temp directory instead of letting a timestamped report land in the repo's
+    /// working tree.
+    /// </summary>
+    private static async Task<CliResult> RunCliIn(string workingDirectory, params string[] arguments)
     {
         var repoRoot = FindRepoRoot();
         var configuration = AppContext.BaseDirectory.Contains($"{Path.DirectorySeparatorChar}Release{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
@@ -334,7 +414,7 @@ public sealed class CliSmokeTests : IDisposable
         var projectPath = Path.Combine(repoRoot, "src", "OneLag.Cli", "OneLag.Cli.csproj");
         var startInfo = new ProcessStartInfo("dotnet")
         {
-            WorkingDirectory = repoRoot,
+            WorkingDirectory = workingDirectory,
             RedirectStandardOutput = true,
             RedirectStandardError = true
         };

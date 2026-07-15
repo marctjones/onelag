@@ -64,7 +64,7 @@ internal static class Program
             Console.Error.WriteLine("Canceled.");
             return 130;
         }
-        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or PlatformNotSupportedException or InvalidOperationException)
         {
             Console.Error.WriteLine($"Error: {ex.Message}");
             return 2;
@@ -74,10 +74,11 @@ internal static class Program
     private static int RunScan(string[] args, CancellationToken cancellationToken)
     {
         var roots = new List<string>();
-        var output = "onelag-report.md";
+        string? output = null;
         var format = "markdown";
         var fullPaths = false;
         var maxItems = 500_000;
+        var overwrite = false;
         TimeSpan? traceDrivers = null;
 
         for (var i = 0; i < args.Length; i++)
@@ -103,6 +104,9 @@ internal static class Program
                 case "--max-items":
                     maxItems = int.Parse(RequireValue(args, ref i, "--max-items"), CultureInfo.InvariantCulture);
                     break;
+                case "--overwrite":
+                    overwrite = true;
+                    break;
                 default:
                     throw new ArgumentException($"Unknown scan argument '{args[i]}'.");
             }
@@ -117,6 +121,15 @@ internal static class Program
         {
             throw new ArgumentException("--max-items must be greater than zero.");
         }
+
+        // The default name is computed only now, after --format is known, because the extension has to match
+        // what is actually written: a JSON report saved as `.md` by default would be a small daily annoyance
+        // forever. An explicit --output always wins and is never touched here.
+        output ??= OutputPaths.Timestamped("onelag-report", format is "json" ? "json" : "md");
+        var outputPath = Path.GetFullPath(output);
+        // Checked before the (possibly slow, possibly driver-tracing) scan runs, not after: a clobber refusal
+        // should not cost the user a directory walk they will have to redo.
+        OutputPaths.EnsureWritable(outputPath, overwrite);
 
         var platform = new WindowsPlatformProbe();
         var runner = new ScanRunner(platform, new InventoryScanner(), new RiskEngine());
@@ -134,7 +147,6 @@ internal static class Program
             ? ReportWriter.ToJson(report)
             : ReportWriter.ToMarkdown(report, redactor);
 
-        var outputPath = Path.GetFullPath(output);
         Directory.CreateDirectory(Path.GetDirectoryName(outputPath) ?? Environment.CurrentDirectory);
         File.WriteAllText(outputPath, text);
 
@@ -164,10 +176,11 @@ internal static class Program
     private static int RunFreeze(string[] args, CancellationToken cancellationToken)
     {
         var duration = TimeSpan.FromSeconds(10);
-        var output = $"onelag-freeze-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}.md";
+        string? output = null;
         var format = "markdown";
         string? note = null;
         var skipTrace = false;
+        var overwrite = false;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -189,6 +202,9 @@ internal static class Program
                 case "--format":
                     format = RequireValue(args, ref i, "--format").ToLowerInvariant();
                     break;
+                case "--overwrite":
+                    overwrite = true;
+                    break;
                 default:
                     throw new ArgumentException($"Unknown freeze argument '{args[i]}'.");
             }
@@ -203,6 +219,10 @@ internal static class Program
         {
             throw new ArgumentException("--format must be 'markdown' or 'json'.");
         }
+
+        output ??= OutputPaths.Timestamped("onelag-freeze", "md");
+        var outputPath = Path.GetFullPath(output);
+        OutputPaths.EnsureWritable(outputPath, overwrite);
 
         var platform = new WindowsPlatformProbe();
         var service = new FreezeCaptureService(platform);
@@ -246,7 +266,6 @@ internal static class Program
             ? FreezeReportWriter.ToJson(capture)
             : FreezeReportWriter.ToMarkdown(capture, redactor);
 
-        var outputPath = Path.GetFullPath(output);
         Directory.CreateDirectory(Path.GetDirectoryName(outputPath) ?? Environment.CurrentDirectory);
         File.WriteAllText(outputPath, text);
 
@@ -521,7 +540,8 @@ internal static class Program
     private static int RunTraceDpc(string[] args, CancellationToken cancellationToken)
     {
         var duration = TimeSpan.FromSeconds(30);
-        var output = "onelag-driver-trace.md";
+        string? output = null;
+        var overwrite = false;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -534,6 +554,9 @@ internal static class Program
                 case "-o":
                     output = RequireValue(args, ref i, args[i]);
                     break;
+                case "--overwrite":
+                    overwrite = true;
+                    break;
                 default:
                     throw new ArgumentException($"Unknown trace dpc argument '{args[i]}'.");
             }
@@ -543,6 +566,13 @@ internal static class Program
         {
             throw new ArgumentException("--duration must be greater than zero and no more than 10m.");
         }
+
+        output ??= OutputPaths.Timestamped("onelag-driver-trace", "md");
+        var fullPath = Path.GetFullPath(output);
+        // Checked before the trace runs, not after: refusing to clobber only after a 30s elevated kernel
+        // capture would waste the one thing this command cannot get back -- the window while the lag was
+        // being reproduced.
+        OutputPaths.EnsureWritable(fullPath, overwrite);
 
         if (!OperatingSystem.IsWindows())
         {
@@ -568,7 +598,6 @@ internal static class Program
         builder.AppendLine();
         ReportWriter.AppendDriverLatency(builder, attribution);
 
-        var fullPath = Path.GetFullPath(output);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath) ?? Environment.CurrentDirectory);
         File.WriteAllText(fullPath, builder.ToString());
 
@@ -594,7 +623,8 @@ internal static class Program
     private static int RunCompare(string[] args)
     {
         var sessions = new List<string>();
-        var output = "onelag-comparison.md";
+        string? output = null;
+        var overwrite = false;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -607,6 +637,9 @@ internal static class Program
                 case "-o":
                     output = RequireValue(args, ref i, args[i]);
                     break;
+                case "--overwrite":
+                    overwrite = true;
+                    break;
                 default:
                     throw new ArgumentException($"Unknown compare argument '{args[i]}'.");
             }
@@ -617,11 +650,14 @@ internal static class Program
             throw new ArgumentException("Provide at least two --session directories to compare, for example a docked session and an undocked session.");
         }
 
+        output ??= OutputPaths.Timestamped("onelag-comparison", "md");
+        var fullPath = Path.GetFullPath(output);
+        OutputPaths.EnsureWritable(fullPath, overwrite);
+
         var service = new SessionComparisonService(new WatchService());
         var comparison = service.Compare(sessions);
         var report = service.BuildReport(comparison);
 
-        var fullPath = Path.GetFullPath(output);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath) ?? Environment.CurrentDirectory);
         File.WriteAllText(fullPath, report);
 
@@ -673,7 +709,8 @@ internal static class Program
 
     private static int RunTracePlan(string[] args)
     {
-        var output = "onelag-trace-plan";
+        string? output = null;
+        var overwrite = false;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -683,10 +720,16 @@ internal static class Program
                 case "-o":
                     output = RequireValue(args, ref i, args[i]);
                     break;
+                case "--overwrite":
+                    overwrite = true;
+                    break;
                 default:
                     throw new ArgumentException($"Unknown support trace-plan argument '{args[i]}'.");
             }
         }
+
+        output ??= OutputPaths.Timestamped("onelag-trace-plan", string.Empty);
+        OutputPaths.EnsureWritable(Path.GetFullPath(output), overwrite);
 
         var files = EscalationPlanWriter.WriteTracePlan(output);
         Console.WriteLine($"Trace escalation plan: {Path.GetFullPath(output)}");
@@ -700,7 +743,7 @@ internal static class Program
 
     private static int RunSupportBundle(string[] args)
     {
-        var output = "onelag-support-bundle";
+        string? output = null;
         var reports = new List<string>();
         string? watchOutput = null;
         string? note = null;
@@ -743,6 +786,10 @@ internal static class Program
                     throw new ArgumentException($"Unknown support bundle argument '{args[i]}'.");
             }
         }
+
+        // SupportBundleWriter already refuses to clobber a non-empty directory unless Overwrite is set (see
+        // PrepareOutputDirectory), so only the default needs timestamping here.
+        output ??= OutputPaths.Timestamped("onelag-support-bundle", string.Empty);
 
         var writer = new SupportBundleWriter(versionProvider: _ => GetVersionText());
         var result = writer.Write(new SupportBundleOptions(
@@ -789,8 +836,9 @@ internal static class Program
     {
         string? source = null;
         string? destination = null;
-        var output = "onelag-move-plan";
+        string? output = null;
         var maxItems = 100_000;
+        var overwrite = false;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -809,6 +857,9 @@ internal static class Program
                 case "--max-items":
                     maxItems = int.Parse(RequireValue(args, ref i, "--max-items"), CultureInfo.InvariantCulture);
                     break;
+                case "--overwrite":
+                    overwrite = true;
+                    break;
                 default:
                     throw new ArgumentException($"Unknown remediate move-plan argument '{args[i]}'.");
             }
@@ -823,6 +874,9 @@ internal static class Program
         {
             throw new ArgumentException("--destination is required.");
         }
+
+        output ??= OutputPaths.Timestamped("onelag-move-plan", string.Empty);
+        OutputPaths.EnsureWritable(Path.GetFullPath(output), overwrite);
 
         var summary = MovePlanWriter.Write(new MovePlanOptions(source, destination, output, maxItems), cancellationToken);
         Console.WriteLine($"Move plan: {Path.GetFullPath(output)}");
@@ -1318,8 +1372,13 @@ internal static class Program
 
     private static int WatchReport(string[] args)
     {
+        // `output` here names the SESSION directory written by `watch start`/`watch mark` and is deliberately
+        // left alone: it is read, not written, by this command, and timestamping it would break the naming
+        // contract those other commands depend on. Only `reportPath`, the generated Markdown file, gets the
+        // timestamped default and the overwrite guard.
         var output = GetDefaultWatchDirectory();
-        var reportPath = "onelag-watch-report.md";
+        string? reportPath = null;
+        var overwrite = false;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -1331,10 +1390,16 @@ internal static class Program
                 case "--report":
                     reportPath = RequireValue(args, ref i, "--report");
                     break;
+                case "--overwrite":
+                    overwrite = true;
+                    break;
                 default:
                     throw new ArgumentException($"Unknown watch report argument '{args[i]}'.");
             }
         }
+
+        reportPath ??= OutputPaths.Timestamped("onelag-watch-report", "md");
+        OutputPaths.EnsureWritable(Path.GetFullPath(reportPath), overwrite);
 
         var fullReportPath = new WatchService().WriteReport(output, reportPath);
         Console.WriteLine($"Watch report: {fullReportPath}");
@@ -1540,8 +1605,8 @@ internal static class Program
 
         Commands:
           selftest                                          (which probes actually measure anything; run this first)
-          scan [--root PATH] [--output PATH] [--format markdown|json] [--full-paths] [--trace-drivers 30s]
-          freeze [--duration 10s] [--note TEXT] [--no-trace] [--output PATH] [--format markdown|json]
+          scan [--root PATH] [--output PATH] [--format markdown|json] [--full-paths] [--trace-drivers 30s] [--overwrite]
+          freeze [--duration 10s] [--note TEXT] [--no-trace] [--output PATH] [--format markdown|json] [--overwrite]
                                                      (run this WHILE the machine is lagging, not after)
           watch start [--duration 8h] [--interval 2s] [--output DIR] [--memory-interval 30s]
                       [--no-auto-capture] [--auto-capture-trace] [--i-understand-collectors-are-degraded]
@@ -1550,18 +1615,24 @@ internal static class Program
           watch stop [--output DIR]
           watch status [--output DIR]
           watch mark [--output DIR] [--note TEXT]
-          watch report [--output DIR] [--report PATH]
-          trace dpc [--duration 30s] [--output PATH]        (names the driver holding the CPU; needs admin)
-          compare --session DIR --session DIR [--output PATH] (docked vs undocked lag rates)
-          collect [--hours 48] [--output DIR] [--all-channels] [--max-total-mb 2048] [--zip] (pull raw logs)
+          watch report [--output DIR] [--report PATH] [--overwrite]
+          trace dpc [--duration 30s] [--output PATH] [--overwrite] (names the driver holding the CPU; needs admin)
+          compare --session DIR --session DIR [--output PATH] [--overwrite] (docked vs undocked lag rates)
+          collect [--hours 48] [--output DIR] [--all-channels] [--max-total-mb 2048] [--zip] [--overwrite] (pull raw logs)
           repair reset-onedrive [--execute --i-understand-reset-disconnects-sync]
-          support trace-plan [--output DIR]
-          support bundle --report PATH [--report PATH] [--watch-output DIR] [--output DIR] [--zip]
-          remediate move-plan --source PATH --destination PATH [--output DIR]
+          support trace-plan [--output DIR] [--overwrite]
+          support bundle --report PATH [--report PATH] [--watch-output DIR] [--output DIR] [--zip] [--overwrite]
+          remediate move-plan --source PATH --destination PATH [--output DIR] [--overwrite]
           remediate reclaim-memory [--execute --i-understand-this-restarts-the-shell]
           view --report PATH [--timeline]
           interactive
           version
+
+        Defaults for report/bundle outputs are timestamped (`onelag-report-20260714-175230.md`), so repeated
+        runs accumulate instead of colliding -- diagnosing lag means comparing two captures, and both have to
+        survive. An explicit --output/--report that already exists is refused unless --overwrite is passed.
+        `watch start --output DIR` and `compare --session DIR` name existing session directories, not report
+        files, and are never timestamped or overwrite-guarded by OneLag.
         """);
     }
 
